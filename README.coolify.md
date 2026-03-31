@@ -20,7 +20,7 @@ Bu repo Coolify uzerinde tek domain ile calisacak sekilde hazirlandi.
 4. Asagidaki environment variable'lari tanimlayin:
    - `OPENWEATHER_API_KEY`
    - `TETRA_MODEL_UPLOAD_DIR=/data/user-models`
-5. Public service olarak `frontend` servisini secin.
+5. Public service olarak `frontend` servisini secin ve port olarak `80` kullanin.
 6. Deploy edin.
 
 ## Kalici Veri
@@ -34,4 +34,4 @@ Bu repo Coolify uzerinde tek domain ile calisacak sekilde hazirlandi.
 docker compose -f docker-compose.coolify.yml up --build
 ```
 
-Ardindan uygulama `http://localhost:8080` adresinden acilir.
+Yerelde test etmek istersen `frontend` servisine gecici olarak `ports: ["8080:80"]` ekleyebilir veya `docker compose port frontend 80` ile eslesen portu kontrol edebilirsin.

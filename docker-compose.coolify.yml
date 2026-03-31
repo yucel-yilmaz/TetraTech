@@ -10,8 +10,8 @@ services:
     depends_on:
       - api
       - sim
-    ports:
-      - "8080:80"
+    expose:
+      - "80"
     volumes:
       - user_models:/usr/share/nginx/html/user-models
 
