@@ -1366,7 +1366,7 @@ function App() {
               <div className="page-header" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 1fr', alignItems: 'center', marginBottom: '1.2rem', gap: '2rem', height: '70px', flexShrink: 0 }}>
                 <div style={{ flex: 1 }}>
                   <div className="page-subtitle">OPERASYONEL BÖLGE DURUMU</div>
-                  <div className="page-title" style={{ fontSize: '1.5rem' }}>Topografik Risk ve Bölge Haritası D</div>
+                  <div className="page-title" style={{ fontSize: '1.5rem' }}>Topografik Risk ve Bölge Haritası</div>
                 </div>
 
                 <div style={{ display: 'flex', gap: '1rem', alignItems: 'center', justifyContent: 'flex-end' }}>
