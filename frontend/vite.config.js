@@ -7,6 +7,17 @@ export default defineConfig({
   plugins: [react()],
   server: {
     port: 5173,
-    strictPort: true
+    strictPort: true,
+    proxy: {
+      '/api': {
+        target: 'http://localhost:8010',
+        changeOrigin: true
+      },
+      '/sim': {
+        target: 'http://localhost:5000',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/sim/, '')
+      }
+    }
   }
 })

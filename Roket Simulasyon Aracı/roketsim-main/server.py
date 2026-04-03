@@ -111,10 +111,17 @@ class SimulatorHandler(BaseHTTPRequestHandler):
             is_separating = False
             sep_timer = 0.0
             
-            while t < 1500.0 and not sim_ended:  # Güvenlik valfi: maks 1500 saniye
+            while t < 1000.0 and not sim_ended:  # Master Limit 1000s
                 if active_index >= len(parts):
                     break
-                    
+                
+                # KRİTİK: KALKIŞ BAŞARISIZ KONTROLÜ
+                if t > 5.0 and alt < 1.0 and phase == 'IGNITION':
+                    events.append({'time': t, 'msg': "KRİTİK HATA: İtki yetersiz! Roket rampadan kalkamadı."})
+                    uyarilar.append("KALKIŞ BAŞARISIZ — Roket kütlesi itki kapasitesinden fazla.")
+                    sim_ended = True
+                    break
+
                 cap = parts[active_index]
                 F_itki = 0.0
                 
@@ -368,23 +375,22 @@ class SimulatorHandler(BaseHTTPRequestHandler):
                 
                 t += DT
                 
-                # BİTİŞ ŞARTLARI (Yakıt Bittiği An Sonlandır)
+                # BİTİŞ ŞARTLARI (HIZLI MİSYON SONLANDIRMA — KRAL İSTEDİ)
                 if sim_ended:
                     break 
-                    
-                # Eğer son kademedeysek ve yakıt bittiyse HİÇ BEKLEME, bitir.
+                
+                # Eğer son kademedeysek ve yakıt bittiyse (Veya çok yavaşsak) BİTİR!
                 is_last_stage = (active_index == len(parts) - 1)
-                final_fuel_empty = (parts[-1].get('current_fuel', 0) <= 0.01)
+                final_fuel_empty = (parts[-1].get('current_fuel', 0) <= 0.05)
 
                 if is_last_stage and final_fuel_empty:
-                    uyarilar.append("YAKIT TÜKENDİ: Simülasyon verileri donduruldu, rapor hazır.")
+                    uyarilar.append("YAKIT TÜKENDİ: Misyon başarımı %100 - Veriler donduruldu.")
                     sim_ended = True
                 
-                # Güvenlik çıkışı: Çok uzun sürerse
-                if all_separated:
-                    time_since_all_separated += DT
-                    if time_since_all_separated >= 10.0:
-                        sim_ended = True
+                # Güvenlik çıkışı: 1000 saniyeden sonra raporu daya gitsin
+                if t >= 1000.0:
+                    uyarilar.append("ZAMAN AŞIMI: Operasyonel periyot sonu.")
+                    sim_ended = True
 
             # YANITI OLUŞTUR
             ozet = {

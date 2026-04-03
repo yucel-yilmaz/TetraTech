@@ -1,4 +1,7 @@
 import React from 'react';
+import html2canvas from 'html2canvas';
+import jsPDF from 'jspdf';
+
 import { motion, AnimatePresence } from 'framer-motion';
 import { useRocketSimStore } from './rocketSimStore';
 import { clamp, fmt, gravityAt, airDensityAt, G_SEA } from './rocketSimPhysics';
@@ -294,6 +297,30 @@ export function RocketSimReportModal() {
 
   if (!reportModalOpen || !reportData) return null;
 
+  const handleExportPDF = async () => {
+    const element = document.getElementById('tactical-report-content');
+    if (!element) return;
+
+    try {
+      const canvas = await html2canvas(element, {
+        scale: 2,
+        useCORS: true,
+        backgroundColor: '#EEEBDD'
+      });
+      const imgData = canvas.toDataURL('image/png');
+      const pdf = new jsPDF({
+        orientation: 'portrait',
+        unit: 'px',
+        format: [canvas.width, canvas.height]
+      });
+      pdf.addImage(imgData, 'PNG', 0, 0, canvas.width, canvas.height);
+      pdf.save(`TETRA-SIM-REPORT-${fmt(metrics.t,0)}.pdf`);
+    } catch (err) {
+      console.error("PDF Export error:", err);
+      alert("PDF oluşuturuluken bir sorun oluştu.");
+    }
+  };
+
   const SectionTitle = ({ icon: Icon, title }) => (
     <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '1rem', borderBottom: '1px solid rgba(27,23,23,0.1)', paddingBottom: '0.5rem' }}>
       <Icon style={{ color: '#CE1212', fontSize: '1.1rem' }} />
@@ -306,6 +333,7 @@ export function RocketSimReportModal() {
       <motion.div
         initial={{ scale: 0.9, opacity: 0, y: 30 }}
         animate={{ scale: 1, opacity: 1, y: 0 }}
+        id="tactical-report-content"
         style={{
           background: '#EEEBDD',
           width: '100%',
@@ -408,7 +436,7 @@ export function RocketSimReportModal() {
         <div style={{ background: 'white', padding: '1.25rem 2rem', borderTop: '1px solid rgba(27,23,23,0.1)', display: 'flex', justifyContent: 'flex-end', gap: '1rem' }}>
            <button 
              style={{ background: 'transparent', border: '1.5px solid #1B1717', color: '#1B1717', padding: '0.6rem 1.25rem', fontSize: '0.65rem', fontWeight: 900, cursor: 'pointer', borderRadius: '4px' }}
-             onClick={() => window.print()}
+             onClick={handleExportPDF}
            >
              PDF DIŞA AKTAR
            </button>

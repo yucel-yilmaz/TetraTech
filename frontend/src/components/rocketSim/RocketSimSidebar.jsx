@@ -40,77 +40,284 @@ const PRESET_ROCKETS = {
   }
 };
 
-export default function RocketSimSidebar() {
+const MISSION_ROCKET_PROFILES = {
+  ares_1b: {
+    parts: [
+      { id: 'ares_s1', type: 'motor', name: '1. Kademe (5-Segment SRB)', dryMass: '105000', fuelMass: '628000', thrust: '15800000', burnTime: '126', sepAlt: '58000', cd: '0.42', diameter: '3.7' },
+      { id: 'ares_s2', type: 'motor', name: '2. Kademe (J-2X)', dryMass: '20400', fuelMass: '138000', thrust: '1308000', burnTime: '500', sepAlt: '190000', cd: '0.30', diameter: '5.5' }
+    ],
+    payloadMass: 25500,
+  },
+  space_shuttle: {
+    parts: [
+      { id: 'sts_s1', type: 'motor', name: 'SRB Cifti', dryMass: '175000', fuelMass: '1004250', thrust: '23576000', burnTime: '124', sepAlt: '45000', cd: '0.48', diameter: '8.4' },
+      { id: 'sts_s2', type: 'motor', name: 'Orbiter + ET / SSME', dryMass: '113400', fuelMass: '719120', thrust: '5255000', burnTime: '386', sepAlt: '113000', cd: '0.34', diameter: '8.4' }
+    ],
+    payloadMass: 24400,
+  },
+  jupiter_c: {
+    parts: [
+      { id: 'jup_s1', type: 'motor', name: '1. Kademe (Rocketdyne A-7)', dryMass: '4355', fuelMass: '24086', thrust: '369000', burnTime: '155', sepAlt: '35000', cd: '0.42', diameter: '1.78' },
+      { id: 'jup_s2', type: 'motor', name: 'Ust Kademe (Sergeant Cluster)', dryMass: '341', fuelMass: '291', thrust: '73400', burnTime: '7', sepAlt: '115000', cd: '0.26', diameter: '0.8' }
+    ],
+    payloadMass: 14,
+  },
+};
+
+const getMissionProfileKey = (rocketName) => {
+  const name = String(rocketName || '').toLowerCase();
+  if (name.includes('ares')) return 'ares_1b';
+  if (name.includes('space shuttle') || name.includes('shuttle')) return 'space_shuttle';
+  if (name.includes('jupiter-c') || name.includes('jupiter c') || name.includes('juno')) return 'jupiter_c';
+  return null;
+};
+
+const toNumber = (value, fallback = 0) => {
+  if (typeof value === 'number') return Number.isFinite(value) ? value : fallback;
+  const raw = String(value ?? '').trim();
+  if (!raw) return fallback;
+
+  let multiplier = 1;
+  const lower = raw.toLowerCase();
+  if (lower.includes('mn')) multiplier = 1_000_000;
+  else if (lower.includes('kn')) multiplier = 1_000;
+
+  const normalized = raw
+    .replace(/\s+/g, '')
+    .replace(/(?<=\d)[.,](?=\d{3}(\D|$))/g, '')
+    .replace(/,/g, '.')
+    .replace(/[^\d.-]/g, '');
+
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) ? parsed * multiplier : fallback;
+};
+
+const buildMissionProfileParts = (profile, rocket) => {
+  const baseDiameter = toNumber(rocket?.diameter, 2.0);
+  const payloadMass = toNumber(rocket?.payload, profile.payloadMass ?? 0);
+  const parts = profile.parts.map((part) => ({
+    ...part,
+    diameter: String(toNumber(part.diameter, baseDiameter))
+  }));
+
+  if (payloadMass > 0) {
+    parts.push({
+      id: `${profile.parts[0].id}_payload`,
+      type: 'payload',
+      name: 'Faydali Yuk',
+      dryMass: String(payloadMass),
+      fuelMass: '0',
+      thrust: '0',
+      burnTime: '0',
+      sepAlt: '0',
+      cd: '0.22',
+      diameter: String(baseDiameter),
+      noTumble: true
+    });
+  }
+
+  return parts;
+};
+
+const normalizeMissionParts = (rocket) => {
+  if (!rocket) return [];
+
+  if (Array.isArray(rocket.orkParts) && rocket.orkParts.length > 0) {
+    return rocket.orkParts.map((part, index) => ({
+      id: part.id || `lock_part_${index + 1}`,
+      type: part.type || (index === rocket.orkParts.length - 1 ? 'payload' : 'motor'),
+      name: part.name || `Kademe ${index + 1}`,
+      dryMass: String(toNumber(part.dryMass ?? part.dry_mass ?? part.mass, 50)),
+      fuelMass: String(toNumber(part.fuelMass ?? part.fuel_mass, 0)),
+      thrust: String(toNumber(part.thrust, 0)),
+      burnTime: String(toNumber(part.burnTime ?? part.burn_time, 0)),
+      sepAlt: String(toNumber(part.sepAlt ?? part.sep_alt, (index + 1) * 85000)),
+      cd: String(toNumber(part.cd, part.type === 'payload' ? 0.25 : 0.4)),
+      diameter: String(toNumber(part.diameter, toNumber(rocket.diameter, 1.5))),
+      noTumble: Boolean(part.noTumble ?? (part.type === 'payload'))
+    }));
+  }
+
+  const profileKey = getMissionProfileKey(rocket.name);
+  if (profileKey && MISSION_ROCKET_PROFILES[profileKey]) {
+    return buildMissionProfileParts(MISSION_ROCKET_PROFILES[profileKey], rocket);
+  }
+
+  const totalMass = toNumber(rocket.gross_mass ?? rocket.dry_mass ?? rocket.mass, 1000);
+  const thrust = toNumber(rocket.thrust, 8000);
+  const payload = toNumber(rocket.payload, totalMass * 0.05);
+  const diameter = toNumber(rocket.diameter, 2.0);
+  const fuelRatio = totalMass > 500000 ? 0.88 : totalMass > 50000 ? 0.85 : 0.78;
+  const dryRatio = Math.max(0.1, 1 - fuelRatio);
+  const parts = [{
+    id: 'lock_m_1',
+    type: 'motor',
+    name: `${rocket.name} Ana Govde`,
+    dryMass: String(totalMass * dryRatio),
+    fuelMass: String(totalMass * fuelRatio),
+    thrust: String(thrust),
+    burnTime: String(totalMass > 500000 ? 180 : totalMass > 50000 ? 145 : 110),
+    sepAlt: '85000',
+    cd: '0.4',
+    diameter: String(diameter),
+    noTumble: false
+  }];
+
+  if (payload > 0) {
+    parts.push({
+      id: 'lock_p_1',
+      type: 'payload',
+      name: 'Faydali Yuk',
+      dryMass: String(payload),
+      fuelMass: '0',
+      thrust: '0',
+      burnTime: '0',
+      sepAlt: '0',
+      cd: '0.25',
+      diameter: String(diameter),
+      noTumble: true
+    });
+  }
+
+  return parts;
+};
+
+const parsePartsForStore = (parts) => parts.map((part) => ({
+  ...part,
+  dryMass: toNumber(part.dryMass, 0),
+  fuelMass: toNumber(part.fuelMass, 0),
+  thrust: toNumber(part.thrust, 0),
+  burnTime: toNumber(part.burnTime, 0),
+  sepAlt: toNumber(part.sepAlt, 0),
+  cd: toNumber(part.cd, 0.4),
+  diameter: toNumber(part.diameter, 0.2),
+}));
+
+export default function RocketSimSidebar({ onClose, isMissionMode = false }) {
   const { params, updateParam, updateParts, initiateLaunch, running, phase, resetSim } = useRocketSimStore();
   
   const [selectedPreset, setSelectedPreset] = useState('custom');
   const [dbRockets, setDbRockets] = useState({});
 
   useEffect(() => {
-    fetch(apiUrl('/hermes/rockets'))
-      .then(res => res.json())
-      .then(data => {
+    const loadInventory = async () => {
+      const fresh = {};
+
+      // 1. --- GARAJ VARSAYILANLARI (ALWAYS LOAD) ---
+      const defaultRocketsList = [
+        { id: 'ares', name: 'Ares 1 (B)', burnTime: '135', thrust: '16000000', gross_mass: '801000', diameter: '5.5' },
+        { id: 'shuttle', name: 'Space Shuttle', burnTime: '240', thrust: '29000000', gross_mass: '2030000', diameter: '8.4' },
+        { id: 'explorer', name: 'Jupiter-C Rocket', burnTime: '155', thrust: '370000', gross_mass: '28000', diameter: '1.78' },
+        { id: 'cassini', name: 'Cassini-Huygens', burnTime: '180', thrust: '450', gross_mass: '2523', diameter: '4.0' },
+        { id: 'agena', name: 'Agena Target', burnTime: '120', thrust: '71000', gross_mass: '6000', diameter: '1.5' },
+        { id: 'mir', name: 'Mir İstasyonu', burnTime: '1', thrust: '0', gross_mass: '129700', diameter: '31' },
+      ];
+
+      defaultRocketsList.forEach(r => {
+        // TEMİZ SAYISAL VERİ ÇEKİMİ (Virgüllü formatı önler)
+        let totalM = parseFloat(r.gross_mass.toString().replace(/,/g, '')) || 1000;
+        let thr = parseFloat(r.thrust.toString().replace(/,/g, '')) || 0;
+        let pl = (totalM * 0.05); // %5 Oranında faydalı yük tahmini
+        
+        // %10 Gövde (Dry), %90 Yakıt (Fuel) — Standart Aerospace Ratio
+        let dM = totalM * 0.15; 
+        let fM = totalM * 0.85;
+
+        const parts = [{
+          id: 'sys_def_m_' + r.id,
+          type: 'motor',
+          name: r.name + ' Ana Gövde',
+          dryMass: dM.toString(),
+          fuelMass: fM.toString(),
+          thrust: thr.toString(),
+          burnTime: r.burnTime,
+          sepAlt: '85000',
+          cd: '0.4',
+          diameter: (parseFloat(r.diameter) || 2.0).toString(),
+          noTumble: false
+        }];
+        if (pl > 0 && r.id !== 'mir') {
+          parts.push({
+            id: 'sys_def_p_' + r.id,
+            type: 'payload',
+            name: 'P/L Modülü',
+            dryMass: pl.toString(),
+            cd: '0.25',
+            diameter: (parseFloat(r.diameter) || 2.0).toString(),
+            noTumble: true
+          });
+        }
+        fresh['sys_def_' + r.id] = { name: `${r.name} (Garaj Modeli)`, parts };
+      });
+
+      // 2. --- CUSTOM ROCKETS (LOCAL STORAGE) ---
+      try {
+        const localStr = localStorage.getItem('tt_rockets');
+        if (localStr) {
+          const local = JSON.parse(localStr);
+          local.forEach((r, idx) => {
+            let dM = parseFloat(r.dry_mass?.toString().replace(/,/g, '')) || 500;
+            let thr = parseFloat(r.thrust?.toString().replace(/,/g, '')) || 8000;
+            let pl = parseFloat(r.payload?.toString().replace(/,/g, '')) || 0;
+            const parts = [{
+              id: 'usr_m_' + Math.random().toString(36).substr(2, 5),
+              type: 'motor',
+              name: 'Kasa + Motor',
+              dryMass: dM.toString(),
+              fuelMass: (dM * 2.5).toString(),
+              thrust: thr.toString(),
+              burnTime: '25',
+              sepAlt: '80000',
+              cd: '0.4',
+              diameter: (parseFloat(r.diameter) || 0.5).toString(),
+              noTumble: false
+            }];
+            if (pl > 0) {
+              parts.push({
+                id: 'usr_p_' + Math.random().toString(36).substr(2, 5),
+                type: 'payload',
+                name: 'Faydalı Yük',
+                dryMass: pl.toString(),
+                cd: '0.2',
+                diameter: (parseFloat(r.diameter) || 0.5).toString(),
+                noTumble: true
+              });
+            }
+            fresh['loc_' + idx] = { name: `${r.name} (Sizin Envanteriniz)`, parts };
+          });
+        }
+      } catch (e) { console.error("Lokal envanter okunamadı:", e); }
+
+      // İlk seti hemen ata
+      setDbRockets({ ...fresh });
+
+      // 3. --- API ROCKETS (REMOTE) ---
+      try {
+        const res = await fetch(apiUrl('/hermes/rockets'));
+        const data = await res.json();
         if (data.rockets) {
-          const fresh = {};
           data.rockets.forEach(r => {
             const parts = r.stages.map((st, idx) => ({
               id: 'sys_' + Math.random().toString(36).substr(2, 5),
               type: st.type || 'motor',
-              name: st.name || `Kademe ${idx+1}`,
+              name: st.name || `Kademe ${idx + 1}`,
               dryMass: (st.dryMass || 0).toString(),
               fuelMass: (st.propellantMass || 0).toString(),
               thrust: (st.thrust || 0).toString(),
               burnTime: (st.burnTime || 0).toString(),
-              sepAlt: ((idx + 1) * 75000).toString(), // Akıllı ayrılma yüksekliği varsayımı
+              sepAlt: ((idx + 1) * 75000).toString(),
               cd: st.type === 'payload' ? '0.2' : '0.4',
               diameter: (st.diameter || 2.0).toString(),
               noTumble: st.type === 'payload' ? true : false
             }));
             fresh['sys_' + r.name.replace(/\s+/g, '_')] = { name: `${r.name} (Sistem Envanteri)`, parts };
           });
-
-          // TT-Rockets (Local Kullanıcı Araçları)
-          try {
-             const localStr = localStorage.getItem('tt_rockets');
-             if (localStr) {
-                const local = JSON.parse(localStr);
-                local.forEach((r, idx) => {
-                   let dM = parseFloat(r.dry_mass?.toString().replace(/,/g,'')) || 500;
-                   let thr = parseFloat(r.thrust?.toString().replace(/,/g,'')) || 8000;
-                   let pl = parseFloat(r.payload?.toString().replace(/,/g,'')) || 0;
-                   const parts = [{
-                     id: 'usr_m_' + Math.random().toString(36).substr(2, 5),
-                     type: 'motor',
-                     name: 'Kasa + Motor',
-                     dryMass: dM.toString(),
-                     fuelMass: (dM * 2.5).toString(), // Kaba Oran
-                     thrust: thr.toString(),
-                     burnTime: '25',
-                     sepAlt: '80000',
-                     cd: '0.4',
-                     diameter: (parseFloat(r.diameter) || 0.5).toString(),
-                     noTumble: false
-                   }];
-                   if (pl > 0) {
-                      parts.push({
-                        id: 'usr_p_' + Math.random().toString(36).substr(2, 5),
-                        type: 'payload',
-                        name: 'Faydalı Yük',
-                        dryMass: pl.toString(),
-                        cd: '0.2',
-                        diameter: (parseFloat(r.diameter) || 0.5).toString(),
-                        noTumble: true
-                      });
-                   }
-                   fresh['loc_' + idx] = { name: `${r.name} (Sizin Envanteriniz)`, parts };
-                });
-             }
-          } catch(e) { console.error(e); }
-
-          setDbRockets(fresh);
+          setDbRockets({ ...fresh });
         }
-      })
-      .catch(e => console.error("Sistem envanteri okunamadı:", e));
+      } catch (e) { console.warn("API Envanteri çekilemedi, sadece yerel modeller aktif."); }
+    };
+
+    loadInventory();
   }, []);
 
   const combinedPresets = useMemo(() => ({ ...PRESET_ROCKETS, ...dbRockets }), [dbRockets]);
@@ -145,56 +352,77 @@ export default function RocketSimSidebar() {
   const [isLocked, setIsLocked] = useState(false);
   const [lockedData, setLockedData] = useState(null);
 
-  useEffect(() => {
-    const lockStr = localStorage.getItem('tt_mission_lock');
-    if (lockStr) {
-      try {
-        const lock = JSON.parse(lockStr);
-        setIsLocked(true);
-        setLockedData(lock);
-        
-        if (lock.rocket) {
-          const r = lock.rocket;
-          let dM = parseFloat(r.dry_mass?.toString().replace(/,/g,'')) || 500;
-          let thr = parseFloat(r.thrust?.toString().replace(/,/g,'')) || 8000;
-          let pl = parseFloat(r.payload?.toString().replace(/,/g,'')) || 0;
-          
-          const parts = [{
-            id: 'lock_m_1',
-            type: 'motor',
-            name: `${r.name} Ana GövdeMotor`,
-            dryMass: dM.toString(),
-            fuelMass: (dM * 2.5).toString(),
-            thrust: thr.toString(),
-            burnTime: '25',
-            sepAlt: '80000',
-            cd: '0.4',
-            diameter: (parseFloat(r.diameter) || 0.5).toString(),
-            noTumble: false
-          }];
-          if (pl > 0) {
-            parts.push({
-              id: 'lock_p_1',
-              type: 'payload',
-              name: 'Görev FaydalıYükü',
-              dryMass: pl.toString(),
-              cd: '0.2',
-              diameter: (parseFloat(r.diameter) || 0.5).toString(),
-              noTumble: true
-            });
-          }
-          setLocalParts(parts);
-          setSelectedPreset('custom');
-        }
+  const missionSyncRef = React.useRef(false);
 
-        if (lock.weather) {
-          setWind(lock.weather.wind_speed?.toString() || "0");
-          setTemp(lock.weather.temp?.toString() || "15");
-          setPress(lock.weather.pressure?.toString() || "1013");
-        }
-      } catch (e) { console.warn("Kilit okunurken hata:", e); }
+  useEffect(() => {
+    if (!isMissionMode) {
+      setIsLocked(false);
+      setLockedData(null);
+      missionSyncRef.current = false;
+      return;
     }
-  }, []);
+
+    const lockStr = localStorage.getItem('tt_mission_lock');
+    if (!lockStr) return;
+
+    try {
+      const lock = JSON.parse(lockStr);
+      const lockWeather = lock.weather || lock.weather_forecast || {};
+      const missionParts = normalizeMissionParts(lock.rocket);
+
+      setIsLocked(true);
+      setLockedData(lock);
+
+      if (missionParts.length > 0) {
+        setLocalParts(missionParts);
+        setSelectedPreset('custom');
+      }
+
+      setWind(String(toNumber(lockWeather.wind, 0)));
+      setTemp(String(toNumber(lockWeather.temp, 15)));
+      setPress(String(toNumber(lockWeather.pressure, 1013)));
+    } catch (e) {
+      console.warn("Kilit okunurken hata:", e);
+    }
+  }, [isMissionMode]);
+
+  useEffect(() => {
+    if (!isMissionMode || missionSyncRef.current) return;
+
+    const lockStr = localStorage.getItem('tt_mission_lock');
+    if (!lockStr) return;
+
+    try {
+      const lock = JSON.parse(lockStr);
+      const missionParts = normalizeMissionParts(lock.rocket);
+      const lockWeather = lock.weather || lock.weather_forecast || {};
+      const missionWind = toNumber(lockWeather.wind, 0);
+      const missionTemp = toNumber(lockWeather.temp, 15);
+      const missionPressure = toNumber(lockWeather.pressure, 1013);
+
+      if (missionParts.length === 0) return;
+
+      missionSyncRef.current = true;
+      setLocalParts(missionParts);
+      setSelectedPreset('custom');
+      setWind(String(missionWind));
+      setTemp(String(missionTemp));
+      setPress(String(missionPressure));
+
+      const timer = setTimeout(() => {
+        resetSim();
+        updateParts(parsePartsForStore(missionParts));
+        updateParam('windSpeed', missionWind);
+        updateParam('temperature', missionTemp);
+        updateParam('pressure', missionPressure);
+        initiateLaunch();
+      }, 350);
+
+      return () => clearTimeout(timer);
+    } catch (e) {
+      console.warn('Mission sync v2 failed:', e);
+    }
+  }, [isMissionMode, resetSim, updateParam, updateParts, initiateLaunch]);
 
   const handleFetchLiveWeather = async () => {
     const city = prompt("Hangi şehir için gerçek zamanlı hava verisi çekilsin?", "Ankara");
@@ -359,6 +587,34 @@ export default function RocketSimSidebar() {
           <p style={{ margin: 0, fontSize: '0.55rem', fontWeight: 800, color: 'rgba(27, 23, 23, 0.5)', textTransform: 'uppercase', letterSpacing: '1.5px' }}>Çok Kademeli Uçuş & Balistik Ayrılma</p>
         </div>
       </div>
+
+      {/* GÖREV KİLİDİ BLOĞU (KRAL İSTEDİ) */}
+      {isLocked && (
+        <motion.div 
+          initial={{ opacity: 0, y: -10 }}
+          animate={{ opacity: 1, y: 0 }}
+          style={{ background: '#1B1717', color: '#EEEBDD', padding: '1rem', borderRadius: '4px', margin: '1rem 1.5rem 0', borderLeft: '4px solid #CE1212', boxShadow: '0 4px 15px rgba(0,0,0,0.1)' }}
+        >
+          <div style={{ fontSize: '0.6rem', fontWeight: 900, color: '#CE1212', letterSpacing: '2px', marginBottom: '4px' }}>MİSYON SENKRONİZASYONU</div>
+          <div style={{ fontSize: '0.8rem', fontWeight: 900, marginBottom: '2px' }}>{lockedData?.rocket?.name || 'Bilinmeyen Araç'}</div>
+          <div style={{ fontSize: '0.55rem', opacity: 0.7, fontWeight: 700 }}>KONUM: {lockedData?.base?.name || 'Küresel Koordinat'}</div>
+          
+          <div style={{ display: 'flex', gap: '10px', marginTop: '10px', borderTop: '1px solid rgba(238,235,221,0.1)', paddingTop: '10px' }}>
+             <div style={{ display: 'flex', flexDirection: 'column' }}>
+               <span style={{ fontSize: '0.45rem', opacity: 0.5 }}>RÜZGAR</span>
+               <span style={{ fontSize: '0.65rem', fontWeight: 900 }}>{lockedData?.weather?.wind || 0} m/s</span>
+             </div>
+             <div style={{ display: 'flex', flexDirection: 'column' }}>
+               <span style={{ fontSize: '0.45rem', opacity: 0.5 }}>SICAKLIK</span>
+               <span style={{ fontSize: '0.65rem', fontWeight: 900 }}>{lockedData?.weather?.temp || 15}°C</span>
+             </div>
+             <div style={{ display: 'flex', flexDirection: 'column' }}>
+               <span style={{ fontSize: '0.45rem', opacity: 0.5 }}>DURUM</span>
+               <span style={{ fontSize: '0.65rem', color: '#10b981', fontWeight: 900 }}>KİLİTLİ</span>
+             </div>
+          </div>
+        </motion.div>
+      )}
 
       {/* SCROLLABLE CONTENT */}
       <div style={{ flex: 1, overflowY: 'auto', padding: '1rem 1.5rem' }}>

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, Suspense } from 'react'
-import { MapContainer, TileLayer, Marker, Circle, CircleMarker, Popup, useMapEvents, useMap, Polyline } from 'react-leaflet'
+import { MapContainer, TileLayer, Marker, Circle, CircleMarker, Popup, useMapEvents, useMap } from 'react-leaflet'
 import 'leaflet/dist/leaflet.css'
 import L from 'leaflet'
 import { Canvas } from '@react-three/fiber'
@@ -10,6 +10,7 @@ import autoTable from 'jspdf-autotable'
 import html2canvas from 'html2canvas'
 import './App.css'
 import RocketSimPage from './components/rocketSim/RocketSimPage'
+// .
 import { apiUrl, getRocketModelUrl, simUrl, userModelUrl } from './lib/endpoints'
 
 // MUI ICONS
@@ -239,12 +240,34 @@ function MapEventsComponent({ onSelect }) {
 
 const parseData = () => ({
   weather: { city: "-", coord: "-", temp: "-", feels_like: "-", temp_min: "-", temp_max: "-", humidity: "-", pressure: "-", wind: "-", clouds: "-", visibility: "-", desc: "Veri Bekleniyor..." },
-  space: { time_tag: "-", mag_bz: "-", mag_bt: "-", mag_status: "-", kp_index: "-", g_scale: "-", xray_flux: "-", radio_scale: "-", alert: "Bekleniyor", flare_prob: "0%", ai_consensus: "Analiz Ediliyor..." },
+  space: { time_tag: '-', mag_bz: '-', mag_bt: '-', mag_status: '-', kp_index: '-', g_scale: '-', xray_flux: '-', radio_scale: '-', alert: 'Bekleniyor', flare_prob: '0%', ai_consensus: 'Analiz Ediliyor...', solar_flare: '-', flare_intensity: '-', risk_level: 'LOW', communication_risk: 'LOW', navigation_risk: 'LOW', radiation_risk: 'LOW', satellite_risk: 'LOW', operation_status: 'IZLENIYOR', source_mode: '-', network_ok: false, next_window: 'Analiz Ediliyor...', active_alerts: [], history: [] },
   topo: { peaks: "-", towers: "-", residential: "-", industrial: "-", score: "-", terrain_info: "Henüz taranmadı", acoustic_risk: "-", civ_risk: "-", airspace_risk: "-", logistics: "-", water_safety: "-", names: [], hazards: [], suitability: "Bekleniyor", target_lat: null, target_lon: null },
   airspace: { status: "-", is_airspace_clear: false, status_message: "Bağlantı Bekleniyor", flights: [], notams: [], restricted_zones: [], wait_time: 0 }
 })
 
-function LocationMarker({ position, setPosition, setAnalyzedTopo }) {
+const topoIncludes = (value, patterns = []) => {
+  const text = String(value || '').toUpperCase();
+  return patterns.some((pattern) => text.includes(String(pattern).toUpperCase()));
+}
+
+const getTopoRiskColor = (value) => {
+  if (topoIncludes(value, ['YUKSEK', 'KRITIK', 'RED', 'UYGUN DEGIL'])) return '#CE1212';
+  if (topoIncludes(value, ['ORTA', 'SINIRLI', 'KONTROLLU', 'DETAYLI'])) return '#f59e0b';
+  return '#1B1717';
+}
+
+const getTopoDecisionColor = (value) => {
+  if (topoIncludes(value, ['RED', 'KRITIK', 'UYGUN DEGIL'])) return '#CE1212';
+  if (topoIncludes(value, ['SINIRLI', 'DETAYLI', 'KONTROLLU'])) return '#f59e0b';
+  return '#10b981';
+}
+
+const formatTopoDistanceKm = (value) => {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? `${numeric.toFixed(1)} km` : 'Belirsiz';
+}
+
+function LocationMarker({ position, setPosition, setAnalyzedTopo, setMapStage }) {
   const map = useMap();
 
   useEffect(() => {
@@ -258,6 +281,7 @@ function LocationMarker({ position, setPosition, setAnalyzedTopo }) {
       const { lat, lng } = e.latlng;
       setPosition({ lat, lon: lng, lng });
       setAnalyzedTopo(null);
+      if (setMapStage) setMapStage('select');
     },
   })
   return position === null ? null : <Marker position={[position.lat, position.lon]}></Marker>;
@@ -282,9 +306,13 @@ function AnalysisVisuals({ analyzedTopo }) {
     return '#fff';
   }
 
+  const topoScore = Number(analyzedTopo.score || 0);
+  const ringRadius = Number(analyzedTopo.risk_radius_m || 16000);
+  const ringColor = topoScore >= 80 ? '#10b981' : (topoScore >= 55 ? '#f59e0b' : '#ef4444');
+
   return (
     <>
-      <Circle center={[parseFloat(analyzedTopo.target_lat), parseFloat(analyzedTopo.target_lon)]} pathOptions={{ color: '#ef4444', fillColor: '#ef4444', fillOpacity: 0.08, dashArray: '6, 8', weight: 1.5 }} radius={16000} />
+      <Circle center={[parseFloat(analyzedTopo.target_lat), parseFloat(analyzedTopo.target_lon)]} pathOptions={{ color: ringColor, fillColor: ringColor, fillOpacity: 0.08, dashArray: '6, 8', weight: 1.5 }} radius={ringRadius} />
       {analyzedTopo.hazards && analyzedTopo.hazards.map((h, idx) => (
         <CircleMarker key={idx} center={[h.lat, h.lon]} pathOptions={{ color: '#0f172a', fillColor: getColor(h.type), fillOpacity: 0.95, weight: 1.5 }} radius={5.5}>
           <Popup><strong style={{ color: '#0f172a', fontSize: '14px', textTransform: 'uppercase' }}>{h.name}</strong></Popup>
@@ -413,6 +441,7 @@ function App() {
 
   const [activeTab, setActiveTab] = useState('map')
   const [missionType, setMissionType] = useState('launch')
+  const [mapStage, setMapStage] = useState('select')
   const [currentTime, setCurrentTime] = useState(new Date().toLocaleTimeString('tr-TR', { hour12: false }))
   const [selectedRocket, setSelectedRocket] = useState(null)
   const [showRocketList, setShowRocketList] = useState(false)
@@ -428,7 +457,7 @@ function App() {
   const [simLoading, setSimLoading] = useState(false)
   const [isPickMode, setIsPickMode] = useState(false)
   const [pickCoord, setPickCoord] = useState(null)
-  
+
   // UNIFIED SIMULATION STATES
   const [simFlightResult, setSimFlightResult] = useState(null)
   const [simDebrisResult, setSimDebrisResult] = useState(null)
@@ -476,55 +505,57 @@ function App() {
   const [optimalReport, setOptimalReport] = useState(null);
   const [calculatingOptimal, setCalculatingOptimal] = useState(false);
 
-  const handleCalculateOptimal = (isMapMode = false) => {
-    if (!isMapMode && !selectedRocket) {
+  const handleCalculateOptimal = async (isMapMode = false) => {
+    setOptimalReport(null); // Yeni analiz başladığında eskiyi kapat kral!
+    let activeRocket = selectedRocket || rockets[0];
+    if (!activeRocket) {
       addToast("HATA", "Önce bir araç/roket seçmelisiniz.", "danger");
       return;
     }
 
     setCalculatingOptimal(true);
-    addToast("KARAR MOTORU", "Taktiksel hedefleme hesaplanıyor...", "info");
+    addToast("TETRA ASSISTANT", "Tetra Assistant Karar Motoru Başlatılıyor...", "info");
 
-    setTimeout(() => {
-      let activeRocket = selectedRocket || rockets[0];
-      let bestBase = null;
-      let maxScore = -1;
-
-      const mass = parseFloat(activeRocket.dry_mass) || 50000;
-      const thrust = parseFloat(activeRocket.thrust) || 4000000;
-      const tWr = thrust / (mass * 9.81);
-
+    try {
+      let targetLat, targetLon, targetName;
       if (isMapMode) {
-        let sc = data.topo?.score ? parseInt(data.topo.score) : 50;
-        bestBase = { name: "Seçili Otonom Konum", lat: position.lat, lon: position.lon };
-        maxScore = sc;
+        targetLat = position.lat;
+        targetLon = position.lon;
+        targetName = "Seçili Otonom Konum";
       } else {
-        const bases = spaceports.length > 0 ? spaceports : [{ name: "Varsayılan Özel Üs", lat: 28.5, lon: -80.5, type: 'CIVIL' }];
-        bases.forEach(b => {
-          let s = 90;
-          s -= Math.abs(parseFloat(b.lat)) * 0.4;
-          if (b.type === 'MILITARY' || b.type === 'GOVERNMENT') s += 8;
-          if (s > maxScore) { maxScore = s; bestBase = b; }
-        });
+        const topBase = spaceports[0] || { name: "Varsayılan Üs", lat: 28.5, lon: -80.5 };
+        targetLat = topBase.lat;
+        targetLon = topBase.lon;
+        targetName = topBase.name;
       }
 
-      const windTol = parseFloat(activeRocket.windTolerance) || 15;
-      const safeWind = parseFloat(tWr > 1.4 ? windTol * 0.8 : windTol * 0.6).toFixed(1);
+      // 🧠 NEURAL AI MOTORUNA SORGUNUN GÖNDERİLMESİ
+      const url = apiUrl(`/simulate?lat=${targetLat}&lon=${targetLon}&rocket_name=${encodeURIComponent(activeRocket.name)}&date=live`);
+      const resp = await fetch(url);
+      const aiResult = await resp.json();
+
+      if (aiResult.status === "HATA") throw new Error("Tetra Assistant Yanit Vermedi.");
 
       setOptimalReport({
         rocket_name: activeRocket.name,
-        base_name: bestBase.name,
-        base_lat: typeof bestBase.lat === 'number' ? bestBase.lat.toFixed(4) : parseFloat(bestBase.lat).toFixed(4),
-        base_lon: typeof bestBase.lon === 'number' ? bestBase.lon.toFixed(4) : parseFloat(bestBase.lon || bestBase.lng).toFixed(4),
-        score: Math.round(maxScore),
-        safe_wind: safeWind,
-        twr: tWr.toFixed(2),
-        req_temp: 15,
-        req_press: 1013
+        base_name: targetName,
+        base_lat: targetLat.toFixed(4),
+        base_lon: targetLon.toFixed(4),
+        score: aiResult.score || 50,
+        decision: aiResult.decision || "İZLENİYOR",
+        confidence: aiResult.confidence || "0%",
+        safe_wind: (parseFloat(activeRocket.windTolerance || 15) * 0.8).toFixed(1),
+        twr: (parseFloat(activeRocket.thrust || 1000) / (parseFloat(activeRocket.dry_mass || 100) * 9.81)).toFixed(2),
+        req_temp: aiResult.weather?.temp || 15,
+        req_press: aiResult.weather?.pressure || 1013
       });
+      addToast("HESAPLAMA BAŞARILI", `Tetra Assistant Kararı: ${aiResult.decision}`, "success");
+    } catch (e) {
+      console.error(e);
+      addToast("SİSTEM HATASI", "Tetra Assistant ile bağlantı kurulamadı.", "danger");
+    } finally {
       setCalculatingOptimal(false);
-      addToast("HESAPLAMA BAŞARILI", "Optimal Rapor Hazırlandı.", "success");
-    }, 1500);
+    }
   };
 
   const generateOptimalPDF = () => {
@@ -539,7 +570,7 @@ function App() {
       doc.setTextColor(238, 235, 221);
       doc.setFont("courier", "bold");
       doc.setFontSize(16);
-      doc.text("TETRATECH KESIN KARAR MOTORU (AI-HARICI)", 20, 25);
+      doc.text("TETRATECH KESIN KARAR MOTORU (TETRA ASSISTANT)", 20, 25);
 
       doc.setFontSize(9);
       doc.setTextColor(206, 18, 18);
@@ -582,6 +613,184 @@ function App() {
     } catch (e) { console.error(e); }
   };
 
+  const generateOptimalPDFV2 = (reportData = optimalReport) => {
+    if (!reportData) return;
+    addToast("PDF HAZIRLANIYOR", "Optimal kosul raporu olusturuluyor...", "info");
+    try {
+      const tr = str => String(str || "")
+        .replace(/Ä/g, 'G').replace(/Ãœ/g, 'U').replace(/Å/g, 'S').replace(/Ä°/g, 'I')
+        .replace(/Ã–/g, 'O').replace(/Ã‡/g, 'C').replace(/ÄŸ/g, 'g').replace(/Ã¼/g, 'u')
+        .replace(/ÅŸ/g, 's').replace(/Ä±/g, 'i').replace(/Ã¶/g, 'o').replace(/Ã§/g, 'c')
+        .replace(/[^\x00-\x7F]/g, "");
+
+      const doc = new jsPDF();
+      doc.setFillColor(27, 23, 23);
+      doc.rect(0, 0, 210, 42, 'F');
+      doc.setTextColor(238, 235, 221);
+      doc.setFont("courier", "bold");
+      doc.setFontSize(16);
+      doc.text("TETRA ASSISTANT OPTIMAL KOSUL RAPORU", 20, 24);
+      doc.setFontSize(9);
+      doc.setTextColor(206, 18, 18);
+      doc.text("GOREV ONCESI EN UYGUN ATMOSFER VE SAHA OZETI", 20, 34);
+
+      doc.setTextColor(27, 23, 23);
+      doc.setFont("courier", "bold");
+      doc.setFontSize(12);
+      doc.text("1. GOREV OZETI", 20, 56);
+      doc.setFont("courier", "normal");
+      doc.setFontSize(10);
+      doc.text(`HEDEF PLATFORM: ${tr(reportData.rocket_name)}`, 25, 68);
+      doc.text(`ONERILEN US: ${tr(reportData.base_name)}`, 25, 78);
+      doc.text(`KOORDINAT: ${reportData.base_lat} / ${reportData.base_lon}`, 25, 88);
+      doc.text(`KARAR: ${tr(reportData.decision)}`, 25, 98);
+      doc.text(`GUVEN: ${tr(reportData.confidence)}`, 25, 108);
+
+      doc.setFont("courier", "bold");
+      doc.setFontSize(12);
+      doc.text("2. ATMOSFER VE HAVA SAHASI", 20, 126);
+      doc.setFont("courier", "normal");
+      doc.setFontSize(10);
+      doc.text(`MAX RUZGAR LIMITI: ${reportData.safe_wind} m/s`, 25, 138);
+      doc.text(`IDEAL SICAKLIK: ${reportData.req_temp} C`, 25, 148);
+      doc.text(`IDEAL BASINC: ${reportData.req_press} hPa`, 25, 158);
+      doc.text(`ATMOSFER KAYNAGI: ${tr(reportData.weather_label)}`, 25, 168);
+      doc.text(`HAVA SAHASI: ${tr(reportData.airspace_status)}`, 25, 178);
+      doc.text(`RISK SAYISI: ${reportData.risk_count}`, 25, 188);
+
+      doc.setFont("courier", "bold");
+      doc.setFontSize(12);
+      doc.text("3. PERFORMANS NOTLARI", 20, 206);
+      doc.setFont("courier", "normal");
+      doc.setFontSize(10);
+      doc.text(`ITKI / AGIRLIK ORANI (TWR): ${reportData.twr}`, 25, 218);
+      doc.text(`UYGUNLUK SKORU: %${reportData.score}`, 25, 228);
+      doc.text("Bu rapor simulasyon sonu karar ekranindan otomatik uretilmistir.", 25, 238);
+
+      doc.setFontSize(8);
+      doc.setTextColor(130);
+      doc.text(`${new Date().toLocaleString()} | TETRA ASSISTANT`, 105, 284, { align: 'center' });
+
+      const pdfBlobUrl = doc.output('bloburl');
+      window.open(pdfBlobUrl, '_blank');
+      doc.save(`TETRA_OPTIMAL_${Math.floor(Math.random() * 90000)}.pdf`);
+    } catch (e) {
+      console.error(e);
+      addToast("HATA", "Optimal kosul PDF raporu olusturulamadi.", "danger");
+    }
+  };
+
+  const handleCalculateOptimalV2 = async (options = {}) => {
+    const normalized = typeof options === 'boolean' ? { isMapMode: options } : options;
+    const {
+      isMapMode = false,
+      useSimulationContext = false,
+      autoDownloadPdf = false
+    } = normalized || {};
+
+    setOptimalReport(null);
+
+    const activeRocket = useSimulationContext
+      ? (simRocket || selectedRocket || rockets[0])
+      : (selectedRocket || simRocket || rockets[0]);
+
+    if (!activeRocket) {
+      addToast("HATA", "Once bir arac/roket secmelisiniz.", "danger");
+      return null;
+    }
+
+    setCalculatingOptimal(true);
+    addToast("TETRA ASSISTANT", "En uygun kosullar hesaplaniyor...", "info");
+
+    let timeoutId;
+    try {
+      let targetLat;
+      let targetLon;
+      let targetName;
+
+      if (useSimulationContext && simBase) {
+        targetLat = simBase.lat;
+        targetLon = simBase.lon;
+        targetName = simBase.name || "Secili Gorev Ussu";
+      } else if (isMapMode) {
+        targetLat = position.lat;
+        targetLon = position.lon;
+        targetName = "Secili Otonom Konum";
+      } else {
+        const topBase = spaceports[0] || { name: "Varsayilan Us", lat: 28.5, lon: -80.5 };
+        targetLat = topBase.lat;
+        targetLon = topBase.lon;
+        targetName = topBase.name;
+      }
+
+      const controller = new AbortController();
+      timeoutId = window.setTimeout(() => controller.abort(), 15000);
+      const url = apiUrl(`/simulate?lat=${targetLat}&lon=${targetLon}&rocket_name=${encodeURIComponent(activeRocket.name)}&date=live`);
+      const resp = await fetch(url, { signal: controller.signal });
+
+      if (!resp.ok) {
+        throw new Error(`HTTP ${resp.status}`);
+      }
+
+      const aiResult = await resp.json();
+      if (!aiResult || aiResult.status === "HATA") {
+        throw new Error(aiResult?.error || "Tetra Assistant yanit vermedi.");
+      }
+
+      const rocketThrust = parseFloat(String(activeRocket.thrust || 1000).replace(/[^0-9.]/g, '')) || 1000;
+      const rocketMass = parseFloat(String(activeRocket.dry_mass || activeRocket.mass || 100).replace(/[^0-9.]/g, '')) || 100;
+      const windTolerance = parseFloat(activeRocket.windTolerance || activeRocket.tol || 15) || 15;
+
+      const report = {
+        rocket_name: activeRocket.name,
+        base_name: targetName,
+        base_lat: Number(targetLat).toFixed(4),
+        base_lon: Number(targetLon).toFixed(4),
+        score: aiResult.score || 50,
+        decision: aiResult.decision || "IZLENIYOR",
+        confidence: aiResult.confidence || "0%",
+        safe_wind: (windTolerance * 0.8).toFixed(1),
+        twr: (rocketThrust / (rocketMass * 9.81)).toFixed(2),
+        req_temp: aiResult.weather?.temp || aiResult.weather_forecast?.temp || 15,
+        req_press: aiResult.weather?.pressure || aiResult.weather_forecast?.pressure || 1013,
+        weather_label: aiResult.weather?.city || aiResult.weather?.location || "Anlik atmosfer verisi",
+        airspace_status: aiResult.notam?.status_message || (aiResult.notam?.is_airspace_clear ? "Hava sahasi temiz" : "Hava sahasi yogun"),
+        risk_count: Array.isArray(aiResult.risks) ? aiResult.risks.length : 0
+      };
+
+      setOptimalReport(report);
+      addToast("HESAPLAMA BASARILI", `Tetra Assistant karari: ${aiResult.decision}`, "success");
+
+      if (autoDownloadPdf) {
+        generateOptimalPDFV2(report);
+      }
+
+      return report;
+    } catch (e) {
+      console.error(e);
+      if (e?.name === 'AbortError') {
+        addToast("ZAMAN ASIMI", "En uygun kosul sorgusu zaman asimina ugradi.", "danger");
+      } else {
+        addToast("SISTEM HATASI", "En uygun kosul sorgusu tamamlanamadi.", "danger");
+      }
+      return null;
+    } finally {
+      if (timeoutId) clearTimeout(timeoutId);
+      setCalculatingOptimal(false);
+    }
+  };
+
+  const handleGenerateOptimalMissionReport = async () => {
+    const report = await handleCalculateOptimalV2({
+      useSimulationContext: true,
+      autoDownloadPdf: true
+    });
+
+    if (!report) {
+      addToast("HATA", "Optimal kosul raporu olusturulamadi.", "danger");
+    }
+  };
+
   const mapRef = React.useRef();
 
   const addToast = (title, message, type = 'info') => {
@@ -617,13 +826,196 @@ function App() {
   }, [spaceports]);
 
   const defaultRockets = [
-    { id: 'ares', name: 'Ares 1 (B)', filename: 'Ares_1_B.glb', class: 'Yörünge Yük Fırlatıcısı', payload: '25.000 KG', thrust: '16.000 kN', windTolerance: 15, cost: '450 Milyon USD', engine: 'Solid Rocket Booster', height: '94 m', diameter: '5.5 m', stages: '2', range: 'LEO / MEO', dry_mass: '801,000 kg', fuel_type: 'PBAN / LOX + LH2', efficiency: 0.85 },
-    { id: 'shuttle', name: 'Space Shuttle', filename: 'Shuttle.glb', class: 'Personel ve Kargo Aracı', payload: '24.400 KG', thrust: '29.000 kN', windTolerance: 14, cost: '1.5 Milyar USD', engine: '3x RS-25 + 2x SRB', height: '56.1 m', diameter: '8.4 m', stages: '1.5 (External Tank)', range: 'LEO', dry_mass: '2,030,000 kg', fuel_type: 'Solid / LOX + LH2', efficiency: 0.72 },
-    { id: 'explorer', name: 'Jupiter-C Rocket', filename: 'Jupiter.glb', class: 'Erken Dönem Taşıyıcı', payload: '8.4 KG', thrust: '370 kN', windTolerance: 8, cost: '5 Milyon USD', engine: 'Redstone A-7', height: '21.3 m', diameter: '1.78 m', stages: '4', range: 'Sub-orbital / LEO', dry_mass: '28,000 kg', fuel_type: 'Hydyne / LOX', efficiency: 0.65 },
-    { id: 'cassini', name: 'Cassini-Huygens', filename: 'Cassini.glb', class: 'Derin Uzay Sondası', payload: '5.700 KG', thrust: '400 N', windTolerance: 20, cost: '3.2 Milyar USD', engine: 'R-4D', height: '6.7 m', diameter: '4.0 m', stages: 'Titan IVB fırlatıcıdan ayrıldı', range: 'Interplanetary (Saturn)', dry_mass: '2,523 kg', fuel_type: 'MMH / NTO (Bipropellant)', efficiency: 0.95 },
-    { id: 'agena', name: 'Agena Target', filename: 'Agena_Target_Vehicle.glb', class: 'Yörünge Römorkörü', payload: '2.500 KG', thrust: '71 kN', windTolerance: 10, cost: 'Bilinmiyor', engine: 'Bell 8096', height: '7.1 m', diameter: '1.5 m', stages: '1', range: 'LEO (Docking Target)', dry_mass: '6,000 kg', fuel_type: 'UDMH / IRFNA', efficiency: 0.88 },
-    { id: 'mir', name: 'Mir İstasyonu', filename: 'Mir.glb', class: 'Uzay İstasyonu', payload: '129.700 KG', thrust: '0 kN (Yörünge Sabit)', windTolerance: 40, cost: '4.2 Milyar USD', engine: 'N/A', height: '19 m (Ana Modül)', diameter: '31 m (Yayılım)', stages: '7 Modül', range: 'Low Earth Orbit', dry_mass: '129,700 kg', fuel_type: 'Hydrazine (RCS)', efficiency: 1.0 },
+    { id: 'ares1b', name: 'Ares 1 (B)', filename: 'Ares_1_B.glb', class: 'Yorunge Yuk Firlaticisi', payload: '25.500 KG', thrust: '15.800 kN', windTolerance: 15, cost: '450 Milyon USD', engine: '5-Segment SRB + J-2X', height: '99.1 m', diameter: '5.5 m', stages: '2', range: 'LEO / MEO', dry_mass: '927,100 kg', fuel_type: 'PBAN / LOX + LH2', efficiency: 0.86 },
+    { id: 'shuttle', name: 'Space Shuttle', filename: 'Shuttle.glb', class: 'Personel ve Kargo Araci', payload: '24.400 KG', thrust: '31.136 kN', windTolerance: 14, cost: '1.5 Milyar USD', engine: '3x RS-25 + 2x SRB', height: '56.1 m', diameter: '8.4 m', stages: '2 (SRB + ET)', range: 'LEO', dry_mass: '2,041,100 kg', fuel_type: 'Solid / LOX + LH2', efficiency: 0.84 },
+    { id: 'jupiter', name: 'Jupiter-C Rocket', filename: 'Jupiter.glb', class: 'Erken Donem Tasiyici', payload: '14 KG', thrust: '369 kN', windTolerance: 8, cost: '5 Milyon USD', engine: 'Redstone A-7', height: '21.3 m', diameter: '1.78 m', stages: '2', range: 'Sub-orbital / LEO', dry_mass: '29,000 kg', fuel_type: 'Hydyne / LOX', efficiency: 0.70 },
+    { id: 'cassini', name: 'Cassini-Huygens', filename: 'Cassini.glb', class: 'Derin Uzay Sondasi', payload: '5.700 KG', thrust: '400 N', windTolerance: 20, cost: '3.2 Milyar USD', engine: 'R-4D', height: '6.7 m', diameter: '4.0 m', stages: 'Titan IVB firlaticidan ayrildi', range: 'Interplanetary (Saturn)', dry_mass: '2,523 kg', fuel_type: 'MMH / NTO (Bipropellant)', efficiency: 0.95 },
+    { id: 'agena', name: 'Agena Target', filename: 'Agena_Target_Vehicle.glb', class: 'Yorunge Romorkoru', payload: '2.500 KG', thrust: '71 kN', windTolerance: 10, cost: 'Bilinmiyor', engine: 'Bell 8096', height: '7.1 m', diameter: '1.5 m', stages: '1', range: 'LEO (Docking Target)', dry_mass: '6,000 kg', fuel_type: 'UDMH / IRFNA', efficiency: 0.88 },
   ];
+
+  const missionSimProfiles = {
+    ares_1b: {
+      parts: [
+        { id: 'ares_s1', type: 'motor', name: '1. Kademe (5-Segment SRB)', dryMass: '105000', fuelMass: '628000', thrust: '15800000', burnTime: '126', sepAlt: '58000', cd: '0.42', diameter: '3.7' },
+        { id: 'ares_s2', type: 'motor', name: '2. Kademe (J-2X)', dryMass: '20400', fuelMass: '138000', thrust: '1308000', burnTime: '500', sepAlt: '190000', cd: '0.30', diameter: '5.5' }
+      ],
+      payloadMass: 25500,
+    },
+    space_shuttle: {
+      parts: [
+        { id: 'sts_s1', type: 'motor', name: 'SRB Cifti', dryMass: '175000', fuelMass: '1004250', thrust: '23576000', burnTime: '124', sepAlt: '45000', cd: '0.48', diameter: '8.4' },
+        { id: 'sts_s2', type: 'motor', name: 'Orbiter + ET / SSME', dryMass: '113400', fuelMass: '719120', thrust: '5255000', burnTime: '386', sepAlt: '113000', cd: '0.34', diameter: '8.4' }
+      ],
+      payloadMass: 24400,
+    },
+    jupiter_c: {
+      parts: [
+        { id: 'jup_s1', type: 'motor', name: '1. Kademe (Rocketdyne A-7)', dryMass: '4355', fuelMass: '24086', thrust: '369000', burnTime: '155', sepAlt: '35000', cd: '0.42', diameter: '1.78' },
+        { id: 'jup_s2', type: 'motor', name: 'Ust Kademe (Sergeant Cluster)', dryMass: '341', fuelMass: '291', thrust: '73400', burnTime: '7', sepAlt: '115000', cd: '0.26', diameter: '0.8' }
+      ],
+      payloadMass: 14,
+    },
+  };
+
+  const parseMissionValue = (value, fallback = 0) => {
+    if (typeof value === 'number') return Number.isFinite(value) ? value : fallback;
+    const raw = String(value ?? '').trim();
+    if (!raw) return fallback;
+
+    let multiplier = 1;
+    const lower = raw.toLowerCase();
+    if (lower.includes('mn')) multiplier = 1000000;
+    else if (lower.includes('kn')) multiplier = 1000;
+
+    const normalized = raw
+      .replace(/\s+/g, '')
+      .replace(/(?<=\d)[.,](?=\d{3}(\D|$))/g, '')
+      .replace(/,/g, '.')
+      .replace(/[^\d.-]/g, '');
+
+    const parsed = Number(normalized);
+    return Number.isFinite(parsed) ? parsed * multiplier : fallback;
+  };
+
+  const getMissionProfileKey = (rocketName = '') => {
+    const name = String(rocketName || '').toLowerCase();
+    if (name.includes('ares')) return 'ares_1b';
+    if (name.includes('space shuttle') || name.includes('shuttle')) return 'space_shuttle';
+    if (name.includes('jupiter-c') || name.includes('jupiter c') || name.includes('juno')) return 'jupiter_c';
+    return null;
+  };
+
+  const buildMissionStageParts = (rocket) => {
+    if (!rocket) return [];
+
+    if (Array.isArray(rocket.orkParts) && rocket.orkParts.length > 0) {
+      return rocket.orkParts.map((part, index) => ({
+        id: part.id || `mission_part_${index + 1}`,
+        type: part.type || (index === rocket.orkParts.length - 1 ? 'payload' : 'motor'),
+        name: part.name || `Kademe ${index + 1}`,
+        dryMass: parseMissionValue(part.dryMass ?? part.dry_mass ?? part.mass, 50),
+        fuelMass: parseMissionValue(part.fuelMass ?? part.fuel_mass, 0),
+        thrust: parseMissionValue(part.thrust, 0),
+        burnTime: parseMissionValue(part.burnTime ?? part.burn_time, 0),
+        sepAlt: parseMissionValue(part.sepAlt ?? part.sep_alt, (index + 1) * 85000),
+        cd: parseMissionValue(part.cd, part.type === 'payload' ? 0.25 : 0.4),
+        diameter: parseMissionValue(part.diameter, parseMissionValue(rocket.diameter, 1.5)),
+        noTumble: Boolean(part.noTumble ?? (part.type === 'payload'))
+      }));
+    }
+
+    const profileKey = getMissionProfileKey(rocket.name);
+    if (profileKey && missionSimProfiles[profileKey]) {
+      const profile = missionSimProfiles[profileKey];
+      const baseDiameter = parseMissionValue(rocket?.diameter, 2.0);
+      const payloadMass = parseMissionValue(rocket?.payload, profile.payloadMass ?? 0);
+      const parts = profile.parts.map((part) => ({
+        ...part,
+        dryMass: parseMissionValue(part.dryMass, 0),
+        fuelMass: parseMissionValue(part.fuelMass, 0),
+        thrust: parseMissionValue(part.thrust, 0),
+        burnTime: parseMissionValue(part.burnTime, 0),
+        sepAlt: parseMissionValue(part.sepAlt, 0),
+        cd: parseMissionValue(part.cd, 0.4),
+        diameter: parseMissionValue(part.diameter, baseDiameter),
+      }));
+
+      if (payloadMass > 0) {
+        parts.push({
+          id: `${profile.parts[0].id}_payload`,
+          type: 'payload',
+          name: 'Faydali Yuk',
+          dryMass: payloadMass,
+          fuelMass: 0,
+          thrust: 0,
+          burnTime: 0,
+          sepAlt: 0,
+          cd: 0.22,
+          diameter: baseDiameter,
+          noTumble: true,
+        });
+      }
+      return parts;
+    }
+
+    const totalMass = parseMissionValue(rocket.gross_mass ?? rocket.dry_mass ?? rocket.mass, 1000);
+    const thrust = parseMissionValue(rocket.thrust, totalMass > 500000 ? 8000000 : (totalMass > 50000 ? 900000 : 120000));
+    const payload = parseMissionValue(rocket.payload, totalMass * 0.04);
+    const diameter = parseMissionValue(rocket.diameter, 2.0);
+
+    if (totalMass > 50000) {
+      return [
+        {
+          id: 'mission_s1',
+          type: 'motor',
+          name: '1. Kademe',
+          dryMass: totalMass * 0.12,
+          fuelMass: totalMass * 0.58,
+          thrust: thrust * 0.82,
+          burnTime: totalMass > 500000 ? 160 : 135,
+          sepAlt: 65000,
+          cd: 0.42,
+          diameter,
+          noTumble: false,
+        },
+        {
+          id: 'mission_s2',
+          type: 'motor',
+          name: '2. Kademe',
+          dryMass: totalMass * 0.08,
+          fuelMass: totalMass * 0.18,
+          thrust: thrust * 0.22,
+          burnTime: totalMass > 500000 ? 320 : 240,
+          sepAlt: 180000,
+          cd: 0.3,
+          diameter: Math.max(1.2, diameter * 0.82),
+          noTumble: false,
+        },
+        {
+          id: 'mission_payload',
+          type: 'payload',
+          name: 'Faydali Yuk',
+          dryMass: payload,
+          fuelMass: 0,
+          thrust: 0,
+          burnTime: 0,
+          sepAlt: 0,
+          cd: 0.22,
+          diameter: Math.max(1.0, diameter * 0.7),
+          noTumble: true,
+        }
+      ];
+    }
+
+    return [
+      {
+        id: 'mission_solo',
+        type: 'motor',
+        name: `${rocket.name || 'Roket'} Ana Govde`,
+        dryMass: totalMass * 0.18,
+        fuelMass: totalMass * 0.78,
+        thrust,
+        burnTime: totalMass > 10000 ? 120 : 70,
+        sepAlt: 90000,
+        cd: 0.4,
+        diameter,
+        noTumble: false,
+      },
+      {
+        id: 'mission_payload',
+        type: 'payload',
+        name: 'Faydali Yuk',
+        dryMass: payload,
+        fuelMass: 0,
+        thrust: 0,
+        burnTime: 0,
+        sepAlt: 0,
+        cd: 0.22,
+        diameter: Math.max(0.8, diameter * 0.7),
+        noTumble: true,
+      }
+    ];
+  };
 
   const [rockets, setRockets] = useState(() => {
     try {
@@ -651,14 +1043,15 @@ function App() {
     localStorage.setItem('tt_rockets', JSON.stringify(customOnly));
   }, [rockets]);
 
-  const fetchTopo = async () => {
+  const fetchTopo = async (targetLat = position.lat, targetLon = position.lng) => {
     setLoadingTopo(true)
     try {
-      const resp = await fetch(apiUrl(`/topo?lat=${position.lat}&lon=${position.lng}`))
+      const resp = await fetch(apiUrl(`/topo?lat=${targetLat}&lon=${targetLon}`))
       if (resp.ok) {
         const res = await resp.json()
         setData(prev => ({ ...prev, topo: res }))
         setAnalyzedTopo(res)
+        setMapStage('report')
       } else {
         throw new Error("Sunucu yanıt vermedi (HTTP " + resp.status + ")")
       }
@@ -697,18 +1090,42 @@ function App() {
       .catch(() => { });
   }, [rockets]);
 
-  const fetchWeather = async (customCity = null) => {
-    setLoadingWeather(true)
+  const fetchWeather = async (customCity = null, targetLat = position.lat, targetLon = position.lon) => {
+    setLoadingWeather(true);
+    setData(prev => ({ 
+      ...prev, 
+      weather: { 
+        ...prev.weather, 
+        coord: `${targetLat.toFixed(4)}, ${targetLon.toFixed(4)}`
+      } 
+    }));
+    
     try {
-      let url = apiUrl(`/weather?lat=${position.lat}&lon=${position.lng}`)
-      if (customCity) url = apiUrl(`/weather?city=${customCity}`)
-      const resp = await fetch(url)
+      let url = apiUrl(`/weather?lat=${targetLat}&lon=${targetLon}`);
+      if (customCity) url = apiUrl(`/weather?city=${customCity}`);
+      
+      const resp = await fetch(url);
       if (resp.ok) {
-        const res = await resp.json()
-        setData(prev => ({ ...prev, weather: res }))
+        const res = await resp.json();
+        setData(prev => ({ ...prev, weather: res }));
+        
+        // Eğer bir şehir araması yapıldıysa ve koordinatlar geldiyse haritayı oraya taşıyalım kral!
+        if (res.coord && res.coord !== "-" && res.coord.includes(",")) {
+          const [resLat, resLon] = res.coord.split(",").map(c => parseFloat(c.trim()));
+          if (!isNaN(resLat) && !isNaN(resLon)) {
+            setPosition({ lat: resLat, lon: resLon, lng: resLon });
+          }
+        }
+      } else {
+        addToast("HATA", "Hava durumu sunucusu yanıt vermedi.", "danger");
       }
-    } catch (error) { } finally { setLoadingWeather(false) }
-  }
+    } catch (error) {
+      console.error("fetchWeather Error:", error);
+      addToast("BAĞLANTI", "Hava durumu verisi alınamadı.", "danger");
+    } finally { 
+      setLoadingWeather(false);
+    }
+  };
 
   const handleWeatherSearch = (e) => {
     if (e) e.preventDefault();
@@ -1003,6 +1420,74 @@ function App() {
     }
   };
 
+  const getPdfSourceLabel = (sourceValue) => {
+    const raw = String(sourceValue || '').trim();
+    if (!raw) return 'LIVE';
+    const upper = raw.toUpperCase();
+    if (upper.includes('FALLBACK')) return 'FALLBACK';
+    if (upper.includes('RADAR')) return 'RADAR';
+    if (upper.includes('NOAA')) return 'NOAA';
+    if (upper.includes('LIVE')) return 'LIVE';
+    return raw;
+  };
+
+  const addPdfSourceTable = (doc, startY, rows, headColor = [45, 55, 72]) => {
+    autoTable(doc, {
+      startY,
+      head: [['Kaynak', 'Mod', 'Guven / Not']],
+      body: rows,
+      styles: { fontSize: 8, font: 'courier', halign: 'left' },
+      headStyles: { fillColor: headColor },
+      margin: { left: 20, right: 20 }
+    });
+  };
+
+  const addPdfApprovalBox = (doc, startY, summaryLines = []) => {
+    doc.setFillColor(245, 245, 245);
+    doc.rect(20, startY, 170, 28, 'F');
+    doc.setDrawColor(27, 23, 23);
+    doc.rect(20, startY, 170, 28);
+    doc.setFont("courier", "bold");
+    doc.setFontSize(10);
+    doc.setTextColor(27, 23, 23);
+    doc.text("TETRA ASSISTANT RAPOR NOTU", 25, startY + 8);
+    doc.setFont("courier", "normal");
+    doc.setFontSize(8);
+    const wrapped = doc.splitTextToSize(summaryLines.filter(Boolean).join(' | '), 155);
+    doc.text(wrapped, 25, startY + 15);
+  };
+
+  const getDecisionTone = (decision = '', status = '', score = 0) => {
+    const text = String(decision || status || '').toUpperCase();
+    if (text.includes('IPTAL') || text.includes('RED') || text.includes('KRITIK') || Number(score) < 40) {
+      return { label: 'KRITIK', color: '#CE1212', bg: '#fef2f2' };
+    }
+    if (text.includes('BEKLE') || text.includes('HOLD') || text.includes('IZLE') || Number(score) < 70) {
+      return { label: 'DIKKAT', color: '#f59e0b', bg: '#fffbeb' };
+    }
+    return { label: 'NOMINAL', color: '#10b981', bg: '#f0fdf4' };
+  };
+
+  const getMissionDecisionRows = () => {
+    const weatherInfo = simResult?.weather_forecast || {};
+    const spaceInfo = simResult?.space || {};
+    const topoInfo = simResult?.topo_stats || {};
+    const notamInfo = simResult?.notam || {};
+    const flightMetrics = simFlightResult?.metrics || {};
+    const debrisZones = simDebrisResult?.impact_zones || [];
+    const avgDebris = debrisZones.length > 0
+      ? (debrisZones.reduce((sum, zone) => sum + (Number(zone.downrange_km) || 0), 0) / debrisZones.length).toFixed(1)
+      : '-';
+
+    return [
+      { title: 'ATMOSFER', value: `${weatherInfo.temp ?? '-'} C / ${weatherInfo.wind_speed ?? weatherInfo.wind ?? '-'} m/s`, note: weatherInfo.desc || 'Meteorolojik veri bekleniyor', color: '#2563eb' },
+      { title: 'UZAY HAVASI', value: spaceInfo.operation_status || spaceInfo.alert || '-', note: `Kp ${spaceInfo.kp_index ?? '-'} / Radyasyon ${spaceInfo.radiation_risk || '-'}`, color: '#7c3aed' },
+      { title: 'TOPO / SAHA', value: topoInfo.launch_recommendation || topoInfo.suitability || topoInfo.airspace_risk || '-', note: `Skor %${topoInfo.score ?? simResult?.score ?? 0} / Sivil risk ${topoInfo.civ_risk || '-'}`, color: '#0f766e' },
+      { title: 'HAVA SAHASI', value: notamInfo.status_message || (notamInfo.is_airspace_clear ? 'Koridor temiz' : 'Izleme gerekli'), note: `Bekleme ${notamInfo.wait_time ?? 0} dk / Kaynak ${notamInfo.source || '-'}`, color: '#b45309' },
+      { title: 'UCUS / BALISTIK', value: flightMetrics.maxAlt ? `${Math.round(flightMetrics.maxAlt).toLocaleString()} m` : 'Fizik veri yok', note: `Maks hiz ${Math.round(flightMetrics.maxVel || 0).toLocaleString()} m/s / Max-Q ${((flightMetrics.maxQ || 0) / 1000).toFixed(1)} kPa`, color: '#1d4ed8' },
+      { title: 'HERMES / ENKAZ', value: debrisZones.length > 0 ? `${debrisZones.length} parca` : 'Enkaz verisi yok', note: debrisZones.length > 0 ? `Ort. menzil ${avgDebris} km / Motor ${simDebrisResult?.method || '-'}` : 'Parca dusus verisi bekleniyor', color: '#be123c' }
+    ];
+  };
   const generateSimulationPDF = () => {
     if (!simResult) return;
     addToast("SIMULASYON RAPORU", "Bilimsel veri seti derleniyor...", "info");
@@ -1058,6 +1543,12 @@ function App() {
       headStyles: { fillColor: [27, 23, 23] }
     });
 
+    addPdfSourceTable(doc, doc.lastAutoTable.finalY + 8, [
+      ['Atmosfer', getPdfSourceLabel(simResult.weather_forecast?.source || data.weather.source), `Sehir: ${tr(simResult.weather_forecast?.city || data.weather.city || '-')}`],
+      ['Uzay Havasi', getPdfSourceLabel(simResult.space?.source_mode || data.space.source_mode), `Durum: ${tr(simResult.space?.operation_status || data.space.operation_status || '-')}`],
+      ['Hava Sahasi', getPdfSourceLabel(simResult.notam?.source || data.airspace.source), tr(simResult.notam?.status_message || data.airspace.status_message || 'Nominal')]
+    ]);
+
     // --- SAYFA 2 ---
     doc.addPage();
     drawHeader(2);
@@ -1104,7 +1595,7 @@ function App() {
     cy += 10;
     autoTable(doc, {
       startY: cy,
-      head: [['Analiz Edilen Altsistem', 'Durum', 'AI Dogrulama']],
+      head: [['Analiz Edilen Altsistem', 'Durum', 'Sistem Dogrulamasi']],
       body: (simResult.details || []).map(d => [tr(d), 'KILITLI / NOMINAL', 'DOGRULANDI']),
       theme: 'grid',
       styles: { font: 'courier', fontSize: 8 },
@@ -1134,10 +1625,225 @@ function App() {
       headStyles: { fillColor: [45, 55, 72] }
     });
 
+    addPdfApprovalBox(doc, doc.lastAutoTable.finalY + 10, [
+      `Karar: ${tr(simResult.decision)}`,
+      `Skor: %${simResult.score || 0}`,
+      `Guven: ${tr(simResult.confidence || '-')}`,
+      `Motor: ${tr(simResult.ai_engine || 'Tetra Assistant')}`
+    ]);
+
     const pdfBlobUrl = doc.output('bloburl');
     window.open(pdfBlobUrl, '_blank');
     doc.save(`${reportID}_DETAYLI_SIMULASYON.pdf`);
     addToast("BASARILI", "4 Sayfalik 'PRO-ROKET' Analiz Raporu Indirildi.", "success");
+  };
+
+  const generateMissionReportPDF = () => {
+    if (!simResult) return;
+    addToast("SIMULASYON RAPORU", "Profesyonel gorev dosyasi olusturuluyor...", "info");
+
+    const doc = new jsPDF();
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const pageHeight = doc.internal.pageSize.getHeight();
+    const timestamp = new Date().toLocaleString('tr-TR');
+    const reportID = `TT-MSN-${Math.floor(Math.random() * 900000 + 100000)}`;
+    const flightMetrics = simFlightResult?.metrics || {};
+    const debrisZones = simDebrisResult?.impact_zones || [];
+    const notamInfo = simResult?.notam || {};
+    const topoInfo = simResult?.topo_stats || {};
+    const weatherInfo = simResult?.weather_forecast || {};
+    const spaceInfo = simResult?.space || {};
+    const launchLabel = simBase?.name || weatherInfo.city || "Bilinmeyen Firlatma Sahasi";
+    const coordLabel = `${simBase?.lat?.toFixed?.(4) ?? '-'}, ${simBase?.lon?.toFixed?.(4) ?? '-'}`;
+    const tr = str => String(str || "").replace(/Ä/g, 'G').replace(/Ãœ/g, 'U').replace(/Å/g, 'S').replace(/Ä°/g, 'I').replace(/Ã–/g, 'O').replace(/Ã‡/g, 'C').replace(/ÄŸ/g, 'g').replace(/Ã¼/g, 'u').replace(/ÅŸ/g, 's').replace(/Ä±/g, 'i').replace(/Ã¶/g, 'o').replace(/Ã§/g, 'c').replace(/[^\x00-\x7F]/g, "");
+    const fmtValue = (value, fallback = "-") => {
+      if (value === null || value === undefined || value === "") return fallback;
+      return tr(String(value));
+    };
+    const riskRows = (simResult.risks && simResult.risks.length > 0)
+      ? simResult.risks.map((r) => [tr(r.type), tr(r.level), tr(r.msg)])
+      : [["Nominal Operasyon", "GUVENLI", "Kritik risk tespit edilmedi."]];
+
+    const drawHeader = (pageNum, title) => {
+      doc.setFillColor(27, 23, 23);
+      doc.rect(0, 0, pageWidth, 34, 'F');
+      doc.setFont("courier", "bold");
+      doc.setFontSize(17);
+      doc.setTextColor(238, 235, 221);
+      doc.text("TETRATECH GOREV SIMULASYON RAPORU", 16, 16);
+      doc.setFontSize(8);
+      doc.setTextColor(206, 18, 18);
+      doc.text(`RAPOR ID: ${reportID} | SAYFA ${pageNum}`, 16, 24);
+      doc.setTextColor(238, 235, 221);
+      doc.text(tr(title), 194, 24, { align: 'right' });
+    };
+
+    const drawFooter = () => {
+      doc.setFont("courier", "normal");
+      doc.setFontSize(7);
+      doc.setTextColor(120);
+      doc.text(`URETIM ZAMANI: ${timestamp}`, 16, pageHeight - 8);
+      doc.text("TETRATECH // TETRA ASSISTANT MISSION DOSSIER", 194, pageHeight - 8, { align: 'right' });
+    };
+
+    drawHeader(1, "YONETICI OZETI");
+    drawFooter();
+
+    doc.setFillColor(simResult.status === 'UYGUN' ? 240 : 255, simResult.status === 'UYGUN' ? 250 : 240, 240);
+    doc.rect(16, 42, 178, 24, 'F');
+    doc.setFont("courier", "bold");
+    doc.setFontSize(16);
+    doc.setTextColor(simResult.status === 'UYGUN' ? 16 : 206, simResult.status === 'UYGUN' ? 120 : 18, 18);
+    doc.text(tr(simResult.decision), 105, 57, { align: 'center' });
+    doc.setFontSize(9);
+    doc.setTextColor(27, 23, 23);
+    doc.text(`Skor: %${fmtValue(simResult.score, 0)}   |   Guven: ${fmtValue(simResult.confidence)}   |   Motor: ${fmtValue(simResult.ai_engine || 'Tetra Assistant')}`, 105, 64, { align: 'center' });
+
+    autoTable(doc, {
+      startY: 74,
+      head: [['Baslik', 'Deger', 'Durum']],
+      body: [
+        ['Arac / Roket', tr(simResult.rocket_name), 'Hazir'],
+        ['Firlatma Sahasi', tr(launchLabel), 'Baglandi'],
+        ['Koordinat', coordLabel, 'Kilidi Acik'],
+        ['Planlanan Zaman', fmtValue(simResult.target_time), 'Senkron'],
+        ['Hava Durumu Sehri', fmtValue(weatherInfo.city), 'Guncel'],
+        ['Hava Sahasi', fmtValue(notamInfo.status_message, 'Nominal'), notamInfo.is_airspace_clear ? 'Temiz' : 'Izleniyor']
+      ],
+      styles: { fontSize: 8, font: 'courier' },
+      headStyles: { fillColor: [27, 23, 23] },
+      margin: { left: 16, right: 16 }
+    });
+
+    addPdfSourceTable(doc, doc.lastAutoTable.finalY + 8, [
+      ['Atmosfer', getPdfSourceLabel(weatherInfo.source), `Sehir: ${fmtValue(weatherInfo.city)}`],
+      ['Uzay Havasi', getPdfSourceLabel(spaceInfo.source_mode), `Durum: ${fmtValue(spaceInfo.operation_status)}`],
+      ['Hava Sahasi', getPdfSourceLabel(notamInfo.source), fmtValue(notamInfo.status_message, 'Nominal')]
+    ], [71, 85, 105]);
+
+    autoTable(doc, {
+      startY: doc.lastAutoTable.finalY + 8,
+      head: [['Risk Vektoru', 'Seviye', 'Analiz']],
+      body: riskRows,
+      styles: { fontSize: 8, font: 'courier', cellWidth: 'wrap' },
+      headStyles: { fillColor: [206, 18, 18] },
+      margin: { left: 16, right: 16 }
+    });
+
+    doc.addPage();
+    drawHeader(2, "CEVRESEL VE HAVA SAHASI VERISI");
+    drawFooter();
+    autoTable(doc, {
+      startY: 42,
+      head: [['Metrik', 'Deger', 'Yorum']],
+      body: [
+        ['Sicaklik', `${fmtValue(weatherInfo.temp)} C`, 'Termal pencere'],
+        ['Ruzgar', `${fmtValue(weatherInfo.wind_speed || weatherInfo.wind)} m/s`, 'Kalkis stabilitesi'],
+        ['Basinc', `${fmtValue(weatherInfo.pressure)} hPa`, 'Atmosfer yogunlugu'],
+        ['Nem', `%${fmtValue(weatherInfo.humidity)}`, 'Sensor ve yuzey etkisi'],
+        ['Gorus', `${fmtValue(weatherInfo.visibility)} km`, 'Gorsel izleme'],
+        ['Hava Durumu', fmtValue(weatherInfo.desc), 'Meteorolojik sinif'],
+        ['Kp Index', fmtValue(spaceInfo.kp_index), 'Uzay havasi riski'],
+        ['Uzay Hava Uyarisi', fmtValue(spaceInfo.alert), 'Manyetik kosullar'],
+        ['Hava Sahasi Kaynagi', fmtValue(notamInfo.source), 'Radar / fallback'],
+        ['Tahmini Bekleme', `${fmtValue(notamInfo.wait_time, 0)} dk`, 'Koridor temizligi']
+      ],
+      styles: { fontSize: 8, font: 'courier' },
+      headStyles: { fillColor: [71, 85, 105] },
+      margin: { left: 16, right: 16 }
+    });
+
+    autoTable(doc, {
+      startY: doc.lastAutoTable.finalY + 8,
+      head: [['Topo ve Yerlesim', 'Deger', 'Yorum']],
+      body: [
+        ['Topografya Skoru', `%${fmtValue(topoInfo.score, 0)}`, 'Arazi uygunlugu'],
+        ['Arazi Tipi', fmtValue(topoInfo.terrain_info), 'Jeomorfolojik sinif'],
+        ['Yerlesim Yogunlugu', fmtValue(topoInfo.residential), 'Sivil yakinlik'],
+        ['Sivil Risk', fmtValue(topoInfo.civ_risk), 'Operasyonel etki'],
+        ['Lojistik', fmtValue(topoInfo.logistics), 'Saha kapasitesi'],
+        ['Hava Sahasi Riski', fmtValue(topoInfo.airspace_risk), 'Koridor durumu']
+      ],
+      styles: { fontSize: 8, font: 'courier' },
+      headStyles: { fillColor: [27, 23, 23] },
+      margin: { left: 16, right: 16 }
+    });
+
+    doc.addPage();
+    drawHeader(3, "BALISTIK UCUS VERILERI");
+    drawFooter();
+    autoTable(doc, {
+      startY: 42,
+      head: [['Balistik Metrik', 'Deger', 'Acilama']],
+      body: [
+        ['Maks Irtifa', `${Math.round(flightMetrics.maxAlt || 0).toLocaleString()} m`, 'Yukselis tavani'],
+        ['Maks Hiz', `${Math.round(flightMetrics.maxVel || 0).toLocaleString()} m/s`, 'Kinetik zirve'],
+        ['Ucus Suresi', `${Math.round(flightMetrics.t || 0)} s`, 'Toplam profil'],
+        ['Max Q', `${((flightMetrics.maxQ || 0) / 1000).toFixed(1)} kPa`, 'Dinamik basinc'],
+        ['Mach', `${Number(flightMetrics.mach || 0).toFixed(2)}`, 'Transonik rejim'],
+        ['Yanal Sapma', `${Number(flightMetrics.xDist || 0).toFixed(1)} m`, 'Ruzgar etkisi'],
+        ['Yakit Gereksinimi', fmtValue(simResult.environmental?.fuel_needed), 'Tahmini tuketim'],
+        ['Karbon Etkisi', fmtValue(simResult.environmental?.carbon), 'Emisyon kestirimi']
+      ],
+      styles: { fontSize: 8, font: 'courier' },
+      headStyles: { fillColor: [206, 18, 18] },
+      margin: { left: 16, right: 16 }
+    });
+
+    autoTable(doc, {
+      startY: doc.lastAutoTable.finalY + 8,
+      head: [['Tetra Assistant Operasyon Notu']],
+      body: [[tr(simResult.analysis || "Analiz notu bulunamadi.")]],
+      styles: { fontSize: 8, font: 'courier', cellPadding: 4 },
+      headStyles: { fillColor: [27, 23, 23] },
+      margin: { left: 16, right: 16 }
+    });
+
+    doc.addPage();
+    drawHeader(4, "HERMES ENKAZ VE SONUC");
+    drawFooter();
+    autoTable(doc, {
+      startY: 42,
+      head: [['Asama', 'Dusme Noktasi', 'Menzil', 'Kutle', 'Risk']],
+      body: debrisZones.length > 0
+        ? debrisZones.map((zone, index) => [
+            `${index + 1}. Asama`,
+            `${Number(zone.lat || 0).toFixed(4)}, ${Number(zone.lon || 0).toFixed(4)}`,
+            `${fmtValue(zone.downrange_km, 0)} km`,
+            `${fmtValue(zone.mass_kg, 0)} kg`,
+            fmtValue(zone.risk_level, 'Dusuk')
+          ])
+        : [['-', 'Tespit yok', '-', '-', 'Enkaz analizi uretilmedi']],
+      styles: { fontSize: 8, font: 'courier' },
+      headStyles: { fillColor: [71, 85, 105] },
+      margin: { left: 16, right: 16 }
+    });
+
+    const finalSummary = [
+      `Tetra Assistant Sonucu: ${tr(simResult.decision)}`,
+      `Nihai skor %${fmtValue(simResult.score, 0)} olarak hesaplandi.`,
+      `Operasyon sahasi: ${tr(launchLabel)} / ${coordLabel}.`,
+      `Hava sahasi durumu: ${fmtValue(notamInfo.status_message, 'Nominal')}.`
+    ].join(' ');
+    const wrappedSummary = doc.splitTextToSize(tr(finalSummary), 170);
+    doc.setFont("courier", "bold");
+    doc.setFontSize(11);
+    doc.setTextColor(27, 23, 23);
+    doc.text("SONUC OZETI", 16, doc.lastAutoTable.finalY + 14);
+    doc.setFont("courier", "normal");
+    doc.setFontSize(9);
+    doc.text(wrappedSummary, 16, doc.lastAutoTable.finalY + 22);
+    addPdfApprovalBox(doc, doc.lastAutoTable.finalY + 30, [
+      `Karar: ${tr(simResult.decision)}`,
+      `Skor: %${fmtValue(simResult.score, 0)}`,
+      `Guven: ${fmtValue(simResult.confidence)}`,
+      `Hava Sahasi: ${fmtValue(notamInfo.status_message, 'Nominal')}`
+    ]);
+
+    const pdfBlobUrl = doc.output('bloburl');
+    window.open(pdfBlobUrl, '_blank');
+    doc.save(`${reportID}_MISSION_REPORT.pdf`);
+    addToast("BASARILI", "Profesyonel gorev simulasyon raporu olusturuldu.", "success");
   };
 
   const generateDebrisPDF = () => {
@@ -1179,13 +1885,19 @@ function App() {
         ['Firlatma Koordinati', `${debrisLaunchLat}N / ${debrisLaunchLon}E`],
         ['Azimut Acisi', `${debrisAzimuth} derece`],
         ['Hesaplanan Enkaz Sayisi', debrisResult.impact_zones?.length || 0],
-        ['AI Guven Araligi', debrisResult.confidence || 'YUKSEK'],
+        ['Guven Araligi', debrisResult.confidence || 'YUKSEK'],
         ['Yakit / Itki Tipi', tr(debrisResult.propellant)]
       ],
       theme: 'grid',
       styles: { font: 'courier', fontSize: 8 },
       headStyles: { fillColor: [27, 23, 23] }
     });
+
+    addPdfSourceTable(doc, doc.lastAutoTable.finalY + 8, [
+      ['Balistik Motor', getPdfSourceLabel(debrisResult.method || 'BALLISTIC_PHYSICS'), tr(debrisResult.method || 'Deterministik analiz')],
+      ['Uzay Havasi', getPdfSourceLabel(data.space.source_mode), `Durum: ${tr(data.space.operation_status || '-')}`],
+      ['Atmosfer', getPdfSourceLabel(data.weather.source), `Konum: ${tr(data.weather.city || debrisResult.launch_site || '-')}`]
+    ]);
 
     // --- SAYFA 2 ---
     doc.addPage();
@@ -1249,14 +1961,21 @@ function App() {
       headStyles: { fillColor: [45, 55, 72] }
     });
 
+    addPdfApprovalBox(doc, doc.lastAutoTable.finalY + 10, [
+      `Roket: ${tr(debrisResult.rocket || '-')}`,
+      `Guven: ${tr(debrisResult.confidence || '-')}`,
+      `Motor: ${tr(debrisResult.method || 'BALLISTIC_PHYSICS')}`,
+      `Enkaz noktasi: ${debrisResult.impact_zones?.length || 0}`
+    ]);
+
     doc.save(`${reportID}_HERMES_ANALIZ.pdf`);
     addToast("BASARILI", "4 Sayfalik HERMES Analiz Raporu Indirildi.", "success");
   };
 
-  const fetchSpace = async () => {
+  const fetchSpace = async (targetLat = position.lat, targetLon = position.lon) => {
     setLoadingSpace(true);
     try {
-      const resp = await fetch(apiUrl(`/space/current?lat=${position.lat}&lon=${position.lon}`));
+      const resp = await fetch(apiUrl(`/space?lat=${targetLat}&lon=${targetLon}`));
       const res = await resp.json();
 
       // ERKEN UYARI BİLDİRİM MANTIĞI
@@ -1274,10 +1993,10 @@ function App() {
     }
   };
 
-  const fetchAirspace = async () => {
+  const fetchAirspace = async (targetLat = position.lat, targetLon = position.lon) => {
     setLoadingAirspace(true)
     try {
-      const resp = await fetch(apiUrl(`/airspace?lat=${position.lat}&lon=${position.lon}`))
+      const resp = await fetch(apiUrl(`/airspace?lat=${targetLat}&lon=${targetLon}`))
       if (resp.ok) {
         const res = await resp.json()
         setData(prev => ({ ...prev, airspace: res }))
@@ -1303,11 +2022,35 @@ function App() {
   }
 
   useEffect(() => {
-    // İlk açılışta verileri çekelim
-    fetchTopo(); fetchWeather(); fetchSpace(); fetchAirspace();
+    // Sadece zaman sayacını başlatalım, otomatik analizi (fetch) kaldırdık kral!
     const timer = setInterval(() => setCurrentTime(new Date().toLocaleTimeString('tr-TR', { hour12: false })), 1000)
     return () => clearInterval(timer)
   }, [])
+
+  const [scanProgress, setScanProgress] = useState(0);
+  useEffect(() => {
+    let interval;
+    const isScanning = loadingTopo || loadingWeather || loadingAirspace || loadingSpace;
+    if (isScanning) {
+      interval = setInterval(() => {
+        setScanProgress(p => (p < 95 ? p + Math.random() * 5 : p));
+      }, 350);
+    } else if (scanProgress > 0) {
+      setScanProgress(100);
+      const timer = setTimeout(() => setScanProgress(0), 1500);
+      return () => { clearInterval(interval); clearTimeout(timer); };
+    }
+    return () => clearInterval(interval);
+  }, [loadingTopo, loadingWeather, loadingAirspace, loadingSpace]);
+
+  // UZAY HAVASI VE HAVA DURUMU AKILLI TAKİBİ: Sekmeye tıklandığında VEYA konum değiştiğinde veriyi çek kral!
+  useEffect(() => {
+    if (activeTab === 'space') {
+      fetchSpace(position.lat, position.lon);
+    } else if (activeTab === 'weather') {
+      fetchWeather(null, position.lat, position.lon);
+    }
+  }, [activeTab, position.lat, position.lon]);
 
   const maxBounds = [[-90, -180], [90, 180]];
 
@@ -1338,7 +2081,7 @@ function App() {
             <MenuIcon type="simulation" /> Görev Simülasyonu
           </button>
           <button className={`nav-item ${activeTab === 'debris' ? 'active' : ''}`} onClick={() => setActiveTab('debris')}>
-            <MenuIcon type="space" /> Canlı Simülasyon
+            <MenuIcon type="space" /> Uzay Havası
           </button>
           <button className={`nav-item ${activeTab === 'rocketsim' ? 'active' : ''}`} onClick={() => setActiveTab('rocketsim')}>
             <MenuIcon type="rocketsim" /> Roket Uçuş Simülasyonu
@@ -1361,208 +2104,411 @@ function App() {
 
         <main className="main-content">
 
+
           {activeTab === 'map' && (
             <div className="tab-pane fade-in" style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
-              <div className="page-header" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 1fr', alignItems: 'center', marginBottom: '1.2rem', gap: '2rem', height: '70px', flexShrink: 0 }}>
-                <div style={{ flex: 1 }}>
-                  <div className="page-subtitle">OPERASYONEL BÖLGE DURUMU</div>
-                  <div className="page-title" style={{ fontSize: '1.5rem' }}>Topografik Risk ve Bölge Haritası</div>
+              <div className="page-header" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto', alignItems: 'center', gap: '1rem', marginBottom: '1rem', flexShrink: 0 }}>
+                <div>
+                  <div className="page-subtitle" style={{ color: '#CE1212', fontWeight: 900 }}>OPERASYONEL BOLGE DURUMU</div>
+                  <div className="page-title" style={{ fontSize: '1.6rem', marginBottom: '0.35rem' }}>Topografik Risk ve Bolge Haritasi</div>
+                  <div style={{ fontSize: '0.82rem', color: 'rgba(27,23,23,0.65)', fontWeight: 700 }}>
+                    Haritadan nokta sec, analiz et ve sonucu duzgun bir operasyon raporu olarak incele.
+                  </div>
                 </div>
 
-                <div style={{ display: 'flex', gap: '1rem', alignItems: 'center', justifyContent: 'flex-end' }}>
-                  {/* GÖREV TİPİ SEÇİCİ */}
-                  <div style={{ display: 'flex', background: '#cecbbf', padding: '4px', borderRadius: '4px', height: '50px', alignItems: 'center' }}>
+                <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'stretch', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                  <div style={{ display: 'flex', background: '#cecbbf', padding: '4px', borderRadius: '4px', minHeight: '44px', alignItems: 'center' }}>
                     <button
                       onClick={() => setMissionType('launch')}
-                      style={{ padding: '0 1.2rem', height: '100%', fontSize: '0.65rem', fontWeight: 900, background: missionType === 'launch' ? '#1B1717' : 'transparent', color: missionType === 'launch' ? 'white' : '#1B1717', border: 'none', cursor: 'pointer', transition: '0.2s', borderRadius: '4px' }}
+                      style={{ padding: '0 1rem', minHeight: '36px', fontSize: '0.63rem', fontWeight: 900, background: missionType === 'launch' ? '#1B1717' : 'transparent', color: missionType === 'launch' ? '#EEEBDD' : '#1B1717', border: 'none', cursor: 'pointer', borderRadius: '4px' }}
                     >
                       ROKET FIRLATMA
                     </button>
                     <button
                       onClick={() => setMissionType('base')}
-                      style={{ padding: '0 1.2rem', height: '100%', fontSize: '0.65rem', fontWeight: 900, background: missionType === 'base' ? '#1B1717' : 'transparent', color: missionType === 'base' ? 'white' : '#1B1717', border: 'none', cursor: 'pointer', transition: '0.2s', borderRadius: '4px' }}
+                      style={{ padding: '0 1rem', minHeight: '36px', fontSize: '0.63rem', fontWeight: 900, background: missionType === 'base' ? '#1B1717' : 'transparent', color: missionType === 'base' ? '#EEEBDD' : '#1B1717', border: 'none', cursor: 'pointer', borderRadius: '4px' }}
                     >
-                      ÜS İNŞAATI
+                      US INSAATI
                     </button>
                   </div>
 
-                  <div style={{ background: '#cecbbf', padding: '0 1.3rem', borderRadius: '4px', textAlign: 'right', minWidth: '180px', height: '50px', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
-                    <div style={{ fontSize: '0.55rem', color: 'rgba(27, 23, 23, 0.7)', fontWeight: 900, letterSpacing: '1px' }}>HEDEF KOORDİNAT SİSTEMİ</div>
-                    <div style={{ fontSize: '0.8rem', fontWeight: 900, color: '#1B1717' }}>{position.lat.toFixed(4)}N / {position.lon.toFixed(4)}E</div>
+                  <div style={{ background: '#cecbbf', borderRadius: '4px', padding: '0.65rem 0.9rem', minWidth: '180px' }}>
+                    <div style={{ fontSize: '0.55rem', fontWeight: 900, letterSpacing: '1px', color: 'rgba(27,23,23,0.65)', marginBottom: '0.2rem' }}>HEDEF KOORDINAT</div>
+                    <div style={{ fontSize: '0.84rem', fontWeight: 900, color: '#1B1717' }}>{position.lat.toFixed(4)} / {position.lon.toFixed(4)}</div>
                   </div>
 
                   <button
                     className="btn-primary"
-                    onClick={() => { fetchTopo(); fetchWeather(); fetchAirspace(); }}
-                    disabled={loadingTopo || loadingWeather || loadingAirspace}
-                    style={{ padding: '0 1.5rem', height: '50px', fontSize: '0.7rem', letterSpacing: '1px', background: '#cecbbf', color: '#1B1717', borderRadius: '4px', flexShrink: 0 }}
+                    onClick={() => {
+                      setOptimalReport(null)
+                      fetchTopo(position.lat, position.lon)
+                      fetchWeather(null, position.lat, position.lon)
+                      fetchAirspace(position.lat, position.lon)
+                      fetchSpace(position.lat, position.lon)
+                    }}
+                    disabled={loadingTopo || loadingWeather || loadingAirspace || loadingSpace}
+                    style={{ minHeight: '44px', padding: '0 1.2rem', fontSize: '0.66rem', background: '#1B1717', color: '#EEEBDD', borderRadius: '4px' }}
                   >
-                    {loadingTopo || loadingWeather || loadingAirspace ? "TARANIYOR..." : "ANALİZİ BAŞLAT VE TARA"}
+                    {loadingTopo || loadingWeather || loadingAirspace || loadingSpace ? 'TARANIYOR...' : 'ANALIZI BASLAT VE TARA'}
                   </button>
                 </div>
               </div>
 
-              {/* HIZLI NAVIGASYON: UZAY ÜSLERİ */}
-              <div style={{ display: 'flex', gap: '0.8rem', alignItems: 'center', marginBottom: '1.2rem', position: 'relative' }}>
-                <div style={{ fontWeight: 'bold', fontSize: '0.65rem', color: '#CE1212', marginRight: '5px', whiteSpace: 'nowrap' }}>HIZLI KONUMLAR:</div>
-
-                <div style={{ position: 'relative', flex: 1, display: 'flex', alignItems: 'center', overflow: 'hidden' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto', gap: '1rem', alignItems: 'center', marginBottom: '1rem', flexShrink: 0 }}>
+                <div style={{ position: 'relative', display: 'flex', alignItems: 'center', minWidth: 0 }}>
                   <button
                     onClick={() => scrollLocations('left')}
-                    style={{
-                      position: 'absolute', left: 0, zIndex: 10, background: 'rgba(206, 203, 191, 0.8)', border: 'none',
-                      borderRadius: '50%', color: '#1B1717', cursor: 'pointer', display: 'flex', alignItems: 'center',
-                      justifyContent: 'center', width: '24px', height: '24px', backdropFilter: 'blur(4px)',
-                      boxShadow: '0 2px 8px rgba(0,0,0,0.1)'
-                    }}
+                    style={{ width: '28px', height: '28px', borderRadius: '999px', background: '#cecbbf', color: '#1B1717', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', flexShrink: 0 }}
                   >
-                    <ChevronLeftIcon style={{ fontSize: '1.2rem' }} />
+                    <ChevronLeftIcon style={{ fontSize: '1.1rem' }} />
                   </button>
-
                   <div
                     ref={locationsRef}
-                    style={{
-                      display: 'flex', gap: '0.8rem', overflowX: 'auto', padding: '5px 30px', scrollBehavior: 'smooth'
-                    }}
                     className="no-scrollbar"
+                    style={{ display: 'flex', gap: '0.55rem', overflowX: 'auto', padding: '0 0.65rem', minWidth: 0 }}
                   >
                     {spaceports.map((sp, i) => (
                       <button
                         key={i}
-                        onClick={() => setPosition({ lat: sp.lat, lon: sp.lon, lng: sp.lon })}
-                        style={{ padding: '0.6rem 1.2rem', background: '#cecbbf', borderRadius: '4px', fontSize: '0.7rem', fontWeight: 800, cursor: 'pointer', whiteSpace: 'nowrap', transition: '0.2s', border: 'none', color: '#1B1717' }}
-                        onMouseEnter={e => e.target.style.background = '#d9d6c7'}
-                        onMouseLeave={e => e.target.style.background = '#cecbbf'}
+                        onClick={() => {
+                          setOptimalReport(null)
+                          setMapStage('select')
+                          setPosition({ lat: sp.lat, lon: sp.lon, lng: sp.lon })
+                          fetchTopo(sp.lat, sp.lon)
+                          fetchWeather(null, sp.lat, sp.lon)
+                          fetchSpace(sp.lat, sp.lon)
+                          fetchAirspace(sp.lat, sp.lon)
+                        }}
+                        style={{ padding: '0.55rem 0.9rem', background: '#cecbbf', borderRadius: '4px', fontSize: '0.64rem', fontWeight: 800, cursor: 'pointer', whiteSpace: 'nowrap', color: '#1B1717' }}
                       >
                         {sp.name}
                       </button>
                     ))}
                   </div>
-
                   <button
                     onClick={() => scrollLocations('right')}
-                    style={{
-                      position: 'absolute', right: 0, zIndex: 10, background: 'rgba(206, 203, 191, 0.8)', border: 'none',
-                      borderRadius: '50%', color: '#1B1717', cursor: 'pointer', display: 'flex', alignItems: 'center',
-                      justifyContent: 'center', width: '24px', height: '24px', backdropFilter: 'blur(4px)',
-                      boxShadow: '0 2px 8px rgba(0,0,0,0.1)'
-                    }}
+                    style={{ width: '28px', height: '28px', borderRadius: '999px', background: '#cecbbf', color: '#1B1717', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', flexShrink: 0 }}
                   >
-                    <ChevronRightIcon style={{ fontSize: '1.2rem' }} />
+                    <ChevronRightIcon style={{ fontSize: '1.1rem' }} />
+                  </button>
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.55rem', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                  <button
+                    onClick={() => setMapStage('select')}
+                    style={{ padding: '0.55rem 0.9rem', borderRadius: '4px', background: mapStage === 'select' ? '#1B1717' : '#cecbbf', color: mapStage === 'select' ? '#EEEBDD' : '#1B1717', fontSize: '0.64rem', fontWeight: 900, cursor: 'pointer' }}
+                  >
+                    1. KONUM SECIMI
+                  </button>
+                  <span style={{ fontSize: '0.95rem', fontWeight: 900, color: 'rgba(27,23,23,0.35)' }}>→</span>
+                  <button
+                    onClick={() => data.topo?.score && setMapStage('report')}
+                    disabled={!data.topo?.score}
+                    style={{ padding: '0.55rem 0.9rem', borderRadius: '4px', background: mapStage === 'report' ? '#CE1212' : '#cecbbf', color: mapStage === 'report' ? '#EEEBDD' : '#1B1717', fontSize: '0.64rem', fontWeight: 900, cursor: data.topo?.score ? 'pointer' : 'not-allowed', opacity: data.topo?.score ? 1 : 0.45 }}
+                  >
+                    2. ANALIZ SONUCU
                   </button>
                 </div>
               </div>
 
-              <div className="dashboard-grid" style={{ flex: 1, minHeight: 0, gap: '1.2rem', gridTemplateColumns: 'minmax(0, 1fr) 380px' }}>
-                <div className="card" style={{ padding: 0, overflow: 'hidden', position: 'relative', display: 'flex', flexDirection: 'column', borderRadius: '4px' }}>
+              {mapStage === 'select' ? (
+                <div style={{ display: 'grid', gridTemplateColumns: '320px minmax(0, 1fr)', gap: '1rem', flex: 1, minHeight: 0 }}>
+                  <div className="card static-card" style={{ padding: '1rem', borderRadius: '4px', gap: '0.9rem', minHeight: 0 }}>
+                    <div>
+                      <div style={{ fontSize: '0.62rem', fontWeight: 900, letterSpacing: '2px', color: '#CE1212', marginBottom: '0.35rem' }}>KONTROL MODULU</div>
+                      <div style={{ fontSize: '1.05rem', fontWeight: 900, color: '#1B1717' }}>Secim ve Tarama Akisi</div>
+                    </div>
 
-                  <div id="main-map-container" className="map-container-outer" style={{ flex: 1, borderRadius: '4px' }}>
-                    <MapContainer
-                      id="leaflet-map"
-                      center={[position.lat, position.lon]}
-                      zoom={10}
-                      scrollWheelZoom={true}
-                      style={{ height: '100%', width: '100%' }}
-                      maxBounds={maxBounds}
-                      maxBoundsViscosity={1.0}
-                      minZoom={2}
-                    >
-                      <TileLayer
-                        attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-                        url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-                        noWrap={true}
-                      />
-                      <LocationMarker position={position} setPosition={setPosition} setAnalyzedTopo={setAnalyzedTopo} />
-                      <AnalysisVisuals analyzedTopo={analyzedTopo} />
-                    </MapContainer>
+                    <div style={{ background: '#cecbbf', borderRadius: '4px', padding: '0.9rem' }}>
+                      <div style={{ fontSize: '0.56rem', fontWeight: 900, color: 'rgba(27,23,23,0.7)', marginBottom: '0.4rem' }}>ANLIK NOKTA</div>
+                      <div style={{ fontSize: '1rem', fontWeight: 900, color: '#1B1717', marginBottom: '0.25rem' }}>{position.lat.toFixed(4)} / {position.lon.toFixed(4)}</div>
+                      <div style={{ fontSize: '0.7rem', color: 'rgba(27,23,23,0.7)', fontWeight: 700 }}>Haritadan tiklayarak hedef noktayi degistirebilirsin.</div>
+                    </div>
+                    <div style={{ background: '#ffffff', border: '1px solid rgba(27,23,23,0.08)', borderRadius: '4px', padding: '0.9rem' }}>
+                      <div style={{ fontSize: '0.56rem', fontWeight: 900, color: '#1B1717', marginBottom: '0.55rem' }}>ADIMLAR</div>
+                      <div style={{ display: 'grid', gap: '0.55rem' }}>
+                        {[
+                          '1. Haritadan fırlatma bölgesini seç',
+                          '2. Hızlı analiz için hızlı konumları kullan',
+                          '3. Analizi baslat ve tum katmanlari tara',
+                          '4. Sonuc sayfasinda saha raporunu incele'
+                        ].map((item, idx) => (
+                          <div key={idx} style={{ display: 'flex', gap: '0.55rem', alignItems: 'flex-start' }}>
+                            <div style={{ width: '20px', height: '20px', borderRadius: '999px', background: '#1B1717', color: '#EEEBDD', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.6rem', fontWeight: 900, flexShrink: 0 }}>{idx + 1}</div>
+                            <div style={{ fontSize: '0.74rem', color: '#1B1717', fontWeight: 700, lineHeight: 1.45 }}>{item}</div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
 
-                    <div className="map-overlay-bottom" style={{ background: '#cecbbf', padding: '1rem', borderRadius: '4px', display: 'flex', gap: '1rem', alignItems: 'stretch' }}>
-                      <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem', padding: '0.5rem 0.8rem', background: 'rgba(27,23,23,0.05)', borderRadius: '4px', border: '1px solid rgba(27,23,23,0.05)' }}>
-                          <span style={{ color: 'rgba(27, 23, 23, 0.6)', fontSize: '0.5rem', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '1px' }}>TETİKLENEN KOORDİNAT</span>
-                          <span style={{ color: '#1B1717', fontSize: '0.75rem', fontWeight: 900, whiteSpace: 'nowrap' }}>{position.lat.toFixed(4)} <span style={{ color: 'rgba(27,23,23,0.3)', margin: '0 2px' }}>//</span> {position.lon.toFixed(4)}</span>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.7rem' }}>
+                      <div style={{ background: '#cecbbf', padding: '0.8rem', borderRadius: '4px' }}>
+                        <div style={{ fontSize: '0.55rem', fontWeight: 800, opacity: 0.7, marginBottom: '0.2rem' }}>GUVENLIK SKORU</div>
+                        <div style={{ fontSize: '1.2rem', fontWeight: 900, color: '#1B1717' }}>%{data.topo.score || '-'}</div>
+                      </div>
+                      <div style={{ background: '#cecbbf', padding: '0.8rem', borderRadius: '4px' }}>
+                        <div style={{ fontSize: '0.55rem', fontWeight: 800, opacity: 0.7, marginBottom: '0.2rem' }}>SAHA KARARI</div>
+                        <div style={{ fontSize: '0.9rem', fontWeight: 900, color: getTopoDecisionColor(data.topo.launch_recommendation || data.topo.suitability) }}>{data.topo.launch_grade || '-'}</div>
+                      </div>
+                    </div>
+
+                    <div style={{ display: 'grid', gap: '0.55rem', marginTop: 'auto' }}>
+                      <button
+                        className="btn-primary"
+                        onClick={() => fetchTopo(position.lat, position.lon)}
+                        disabled={loadingTopo}
+                        style={{ width: '100%', minHeight: '42px', background: '#1B1717', color: '#EEEBDD', borderRadius: '4px', fontSize: '0.66rem' }}
+                      >
+                        BOLGEYI ONAYLA
+                      </button>
+                      <button
+                        className="btn-primary"
+                        onClick={() => handleCalculateOptimalV2({ isMapMode: true })}
+                        disabled={loadingTopo || calculatingOptimal || !data.topo?.score}
+                        style={{ width: '100%', minHeight: '42px', background: '#CE1212', color: '#EEEBDD', borderRadius: '4px', fontSize: '0.66rem' }}
+                      >
+                        {calculatingOptimal ? 'HESAPLANIYOR...' : 'EN UYGUN KOSULLARI HESAPLA'}
+                      </button>
+                      <button
+                        onClick={() => data.topo?.score && setMapStage('report')}
+                        disabled={!data.topo?.score}
+                        style={{ width: '100%', minHeight: '40px', borderRadius: '4px', background: '#cecbbf', color: '#1B1717', fontSize: '0.64rem', fontWeight: 900, cursor: data.topo?.score ? 'pointer' : 'not-allowed', opacity: data.topo?.score ? 1 : 0.45 }}
+                      >
+                        SONUC SAYFASINA GEC
+                      </button>
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateRows: 'minmax(0, 1fr) auto', gap: '1rem', minHeight: 0 }}>
+                    <div className="card static-card" style={{ padding: '0.9rem', borderRadius: '4px', minHeight: 0 }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.9rem', gap: '1rem', flexWrap: 'wrap' }}>
+                        <div>
+                          <div style={{ fontSize: '0.62rem', fontWeight: 900, color: '#CE1212', letterSpacing: '2px', marginBottom: '0.3rem' }}>OPERASYON HARITASI</div>
+                          <div style={{ fontSize: '1rem', fontWeight: 900, color: '#1B1717' }}>Secilen koordinati burada dogrula</div>
                         </div>
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem', padding: '0.5rem 0.8rem', background: 'rgba(206,18,18,0.05)', borderRadius: '4px', border: '1px solid rgba(206,18,18,0.05)' }}>
-                          <span style={{ color: 'rgba(206,18,18, 0.7)', fontSize: '0.5rem', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '1px' }}>GÜVENLİK PUANI</span>
-                          <span style={{ color: '#CE1212', fontWeight: 900, fontSize: '0.75rem', whiteSpace: 'nowrap' }}>%{data.topo.score}</span>
-                        </div>
+                        <div style={{ fontSize: '0.72rem', fontWeight: 700, color: 'rgba(27,23,23,0.65)' }}>Tikla, tara, sonra rapora gec.</div>
                       </div>
 
-                      <div style={{ display: 'flex', gap: '0.5rem', flex: 1 }}>
-                        <button className="btn-primary" onClick={fetchTopo} disabled={loadingTopo} style={{ flex: 1, padding: '0.5rem 1rem', fontSize: '0.75rem', background: '#1B1717', color: '#EEEBDD', borderRadius: '4px' }}>
-                          BÖLGEYİ ONAYLA
-                        </button>
-                        <button className="btn-primary" onClick={() => handleCalculateOptimal(true)} disabled={loadingTopo || calculatingOptimal || !data.topo?.score} style={{ flex: 1, padding: '0.5rem 1rem', fontSize: '0.7rem', background: '#CE1212', color: '#EEEBDD', borderRadius: '4px' }}>
-                          {calculatingOptimal ? 'HESAPLANIYOR...' : 'EN UYGUN FIRLATMA KOŞULLARI'}
-                        </button>
+                      <div id="main-map-container" className="map-container-outer" style={{ borderRadius: '4px', minHeight: '0', height: '100%', flex: 1, background: '#f8fafc' }}>
+                        <MapContainer
+                          id="leaflet-map"
+                          center={[position.lat, position.lon]}
+                          zoom={10}
+                          scrollWheelZoom={true}
+                          style={{ height: '100%', width: '100%' }}
+                          maxBounds={maxBounds}
+                          maxBoundsViscosity={1.0}
+                          minZoom={2}
+                        >
+                          <TileLayer
+                            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+                            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                            noWrap={true}
+                          />
+                          <LocationMarker position={position} setPosition={setPosition} setAnalyzedTopo={setAnalyzedTopo} setMapStage={setMapStage} />
+                          <AnalysisVisuals analyzedTopo={analyzedTopo} />
+                        </MapContainer>
+                      </div>
+                    </div>
+
+                    <div className="card static-card" style={{ padding: '0.9rem', borderRadius: '4px' }}>
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: '0.75rem' }}>
+                        <div style={{ background: '#cecbbf', padding: '0.75rem', borderRadius: '4px' }}>
+                          <div style={{ fontSize: '0.55rem', fontWeight: 800, opacity: 0.7, marginBottom: '0.2rem' }}>KOORDINAT</div>
+                          <div style={{ fontSize: '0.8rem', fontWeight: 900, color: '#1B1717' }}>{position.lat.toFixed(2)} / {position.lon.toFixed(2)}</div>
+                        </div>
+                        <div style={{ background: '#cecbbf', padding: '0.75rem', borderRadius: '4px' }}>
+                          <div style={{ fontSize: '0.55rem', fontWeight: 800, opacity: 0.7, marginBottom: '0.2rem' }}>SKOR</div>
+                          <div style={{ fontSize: '0.95rem', fontWeight: 900, color: '#1B1717' }}>{data.topo.score || '-'}</div>
+                        </div>
+                        <div style={{ background: '#cecbbf', padding: '0.75rem', borderRadius: '4px' }}>
+                          <div style={{ fontSize: '0.55rem', fontWeight: 800, opacity: 0.7, marginBottom: '0.2rem' }}>ARAZI</div>
+                          <div style={{ fontSize: '0.78rem', fontWeight: 800, color: '#1B1717' }}>{data.topo.terrain_info || 'Bekleniyor'}</div>
+                        </div>
+                        <div style={{ background: '#cecbbf', padding: '0.75rem', borderRadius: '4px' }}>
+                          <div style={{ fontSize: '0.55rem', fontWeight: 800, opacity: 0.7, marginBottom: '0.2rem' }}>YERLESIM</div>
+                          <div style={{ fontSize: '0.78rem', fontWeight: 800, color: getTopoRiskColor(data.topo.civ_risk) }}>{data.topo.civ_risk || 'Bekleniyor'}</div>
+                        </div>
                       </div>
 
                       {optimalReport && (
-                        <div style={{ display: 'flex', background: '#ffffff', padding: '0.6rem', borderRadius: '4px', gap: '1rem', alignItems: 'center', animation: 'fadeIn 0.3s', flex: 1.5, borderLeft: '4px solid #10b981' }}>
-                          <div style={{ flex: 1 }}>
-                            <div style={{ fontSize: '0.55rem', fontWeight: 900, color: 'rgba(27,23,23,0.5)' }}>LİMİT ({optimalReport.rocket_name})</div>
-                            <div style={{ fontSize: '0.9rem', fontWeight: 900, color: '#10b981' }}>{optimalReport.safe_wind} m/s</div>
-                          </div>
-                          <div style={{ flex: 1 }}>
-                            <div style={{ fontSize: '0.55rem', fontWeight: 900, color: 'rgba(27,23,23,0.5)' }}>STANDART HAVA</div>
-                            <div style={{ fontSize: '0.75rem', fontWeight: 900, color: '#1B1717' }}>{optimalReport.req_temp}°C, {optimalReport.req_press}mb</div>
-                          </div>
-                          <button onClick={generateOptimalPDF} style={{ padding: '0.5rem 1rem', background: '#1B1717', color: 'white', border: 'none', borderRadius: '4px', fontWeight: 900, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.65rem', height: '100%' }}>
-                            <PictureAsPdfIcon style={{ fontSize: '0.9rem' }} /> PDF AL
+                        <div style={{ marginTop: '0.85rem', display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '0.85rem', background: '#ffffff', padding: '0.75rem 0.9rem', borderRadius: '4px', borderLeft: '4px solid #1B1717' }}>
+                          <div style={{ fontSize: '0.76rem', fontWeight: 900, color: optimalReport.decision === 'ONAY' ? '#10b981' : '#CE1212' }}>{optimalReport.decision}</div>
+                          <div style={{ fontSize: '0.72rem', fontWeight: 800, color: '#1B1717' }}>Guven: {optimalReport.confidence}</div>
+                          <div style={{ fontSize: '0.72rem', fontWeight: 800, color: '#1B1717' }}>Skor: {optimalReport.score}</div>
+                          <div style={{ fontSize: '0.72rem', fontWeight: 800, color: '#1B1717' }}>Maks ruzgar: {optimalReport.safe_wind} m/s</div>
+                          <button onClick={() => generateOptimalPDFV2()} style={{ marginLeft: 'auto', padding: '0.45rem 0.75rem', background: '#1B1717', color: 'white', border: 'none', borderRadius: '4px', fontWeight: 900, cursor: 'pointer', fontSize: '0.58rem' }}>
+                            PDF
                           </button>
                         </div>
                       )}
                     </div>
                   </div>
                 </div>
-
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', overflow: 'hidden' }}>
-                  <div className="card" style={{ padding: '1.2rem', flex: 1, minHeight: 0, overflowY: 'auto', borderRadius: '4px' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '1rem' }}>
-                      <div>
-                        <div className="card-title" style={{ fontSize: '1rem', marginBottom: '0.1rem' }}>Analiz Raporu</div>
-                        <div className="card-subtitle" style={{ margin: 0, fontSize: '0.6rem' }}>ÇEVRESEL RİSK METRİKLERİ</div>
+              ) : (
+                <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.12fr) 380px', gap: '1rem', flex: 1, minHeight: 0 }}>
+                  <div style={{ display: 'grid', gridTemplateRows: 'auto minmax(0, 1fr)', gap: '1rem', minHeight: 0 }}>
+                    <div className="card static-card" style={{ padding: '0.9rem', borderRadius: '4px' }}>
+                      <div style={{ display: 'flex', gap: '0.7rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                        <button className="btn-primary" onClick={() => setMapStage('select')} style={{ padding: '0.75rem 1rem', background: '#1B1717', color: '#EEEBDD', borderRadius: '4px', fontSize: '0.68rem' }}>
+                          KONUM SAYFASINA DON
+                        </button>
+                        <button
+                          className="btn-primary"
+                          onClick={() => {
+                            setOptimalReport(null)
+                            fetchTopo(position.lat, position.lon)
+                            fetchWeather(null, position.lat, position.lon)
+                            fetchAirspace(position.lat, position.lon)
+                            fetchSpace(position.lat, position.lon)
+                          }}
+                          disabled={loadingTopo || loadingWeather || loadingAirspace || loadingSpace}
+                          style={{ padding: '0.75rem 1rem', background: '#cecbbf', color: '#1B1717', borderRadius: '4px', fontSize: '0.68rem' }}
+                        >
+                          ANALIZI YENILE
+                        </button>
+                        <button className="btn-primary" onClick={() => handleCalculateOptimalV2({ isMapMode: true })} disabled={loadingTopo || calculatingOptimal || !data.topo?.score} style={{ padding: '0.75rem 1rem', background: '#CE1212', color: '#EEEBDD', borderRadius: '4px', fontSize: '0.68rem' }}>
+                          {calculatingOptimal ? 'HESAPLANIYOR...' : 'EN UYGUN KOSULLARI HESAPLA'}
+                        </button>
+                        <button
+                          onClick={generatePDF}
+                          disabled={!data.topo}
+                          style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '6px', background: data.topo ? '#a0a7a4ff' : '#cbd5e1', color: 'white', border: 'none', padding: '0.7rem 0.95rem', fontSize: '0.65rem', fontWeight: 900, cursor: data.topo ? 'pointer' : 'not-allowed', borderRadius: '4px', letterSpacing: '1px' }}
+                        >
+                          <PictureAsPdfIcon fontSize="small" /> PDF RAPORU
+                        </button>
                       </div>
-                      <button
-                        onClick={generatePDF}
-                        disabled={!data.topo}
-                        style={{ display: 'flex', alignItems: 'center', gap: '5px', background: data.topo ? '#a0a7a4ff' : '#cbd5e1', color: 'white', border: 'none', padding: '6px 12px', fontSize: '0.65rem', fontWeight: 900, cursor: data.topo ? 'pointer' : 'not-allowed', borderRadius: '4px', letterSpacing: '1px' }}
-                      >
-                        <PictureAsPdfIcon fontSize="small" /> PDF RAPORU OLUŞTUR
-                      </button>
                     </div>
 
-                    <div className="data-group" style={{ background: '#cecbbf', padding: '0.8rem', borderRadius: '4px', marginBottom: '0.8rem' }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.3rem' }}>
-                        <span className="data-label" style={{ fontWeight: 800, color: '#1B1717', fontSize: '0.55rem' }}>ENGEL ANALİZİ</span>
-                        <span className="data-label" style={{ color: '#787a79ff', fontSize: '0.55rem' }}>NOMİNAL</span>
+                    <div className="card custom-scroll static-card" style={{ padding: '1.05rem', borderRadius: '4px', minHeight: 0, overflowY: 'auto' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '1rem', gap: '1rem' }}>
+                        <div>
+                          <div className="card-title" style={{ fontSize: '1rem', marginBottom: '0.15rem' }}>Analiz Raporu</div>
+                          <div className="card-subtitle" style={{ margin: 0, fontSize: '0.62rem' }}>DUZENLI SAHA OZETI</div>
+                        </div>
+                        <div style={{ textAlign: 'right' }}>
+                          <div style={{ fontSize: '0.58rem', fontWeight: 900, color: 'rgba(27,23,23,0.6)', marginBottom: '0.2rem' }}>HEDEF NOKTA</div>
+                          <div style={{ fontSize: '0.8rem', fontWeight: 900, color: '#1B1717' }}>{position.lat.toFixed(4)} / {position.lon.toFixed(4)}</div>
+                        </div>
                       </div>
-                      <div style={{ fontSize: '0.85rem', color: '#1B1717', fontWeight: 700 }}>{data.topo.terrain_info}</div>
-                    </div>
 
-                    <div className="data-group" style={{ background: '#cecbbf', padding: '0.8rem', borderRadius: '4px', marginBottom: '0.8rem' }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.3rem' }}>
-                        <span className="data-label" style={{ fontWeight: 800, color: '#1B1717', fontSize: '0.55rem' }}>YERLEŞİM RİSKİ</span>
+                      {(scanProgress > 0 || loadingTopo || loadingWeather) && (
+                        <div style={{ background: '#cecbbf', padding: '1rem', borderRadius: '4px', marginBottom: '1rem' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                            <div style={{ fontSize: '0.68rem', fontWeight: 900, color: '#1B1717', letterSpacing: '1px' }}>ANALIZ ILERLEMESI</div>
+                            <div style={{ fontSize: '0.8rem', fontWeight: 900, color: '#CE1212', fontFamily: 'monospace' }}>%{Math.min(100, Math.round(scanProgress))}</div>
+                          </div>
+                          <div style={{ height: '6px', background: '#1B1717', borderRadius: '4px', overflow: 'hidden' }}>
+                            <div style={{ width: `${scanProgress}%`, height: '100%', background: '#CE1212', transition: 'width 0.3s ease-out' }}></div>
+                          </div>
+                        </div>
+                      )}
+
+                      <div style={{ display: 'grid', gap: '0.8rem' }}>
+                        <div style={{ background: '#cecbbf', padding: '0.9rem', borderRadius: '4px' }}>
+                          <div style={{ fontSize: '0.56rem', fontWeight: 900, color: '#1B1717', marginBottom: '0.35rem' }}>ARAZI OZETI</div>
+                          <div style={{ fontSize: '0.92rem', color: '#1B1717', fontWeight: 800 }}>{data.topo.terrain_info}</div>
+                          <div style={{ marginTop: '0.25rem', color: 'rgba(27,23,23,0.65)', fontSize: '0.68rem' }}>Engel analizi ve yuzey durumu bu bolumde yorumlanir.</div>
+                        </div>
+
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '0.8rem' }}>
+                          <div style={{ background: '#cecbbf', padding: '0.9rem', borderRadius: '4px' }}>
+                            <div style={{ fontSize: '0.56rem', fontWeight: 900, color: '#1B1717', marginBottom: '0.35rem' }}>YERLESIM RISKI</div>
+                            <div style={{ fontSize: '0.88rem', color: getTopoRiskColor(data.topo.civ_risk), fontWeight: 800 }}>{data.topo.civ_risk}</div>
+                            <div style={{ marginTop: '0.25rem', color: 'rgba(27,23,23,0.65)', fontSize: '0.68rem' }}>Yerlesim: {data.topo.residential} | Sanayi: {data.topo.industrial}</div>
+                          </div>
+                          <div style={{ background: '#cecbbf', padding: '0.9rem', borderRadius: '4px' }}>
+                            <div style={{ fontSize: '0.56rem', fontWeight: 900, color: '#1B1717', marginBottom: '0.35rem' }}>HAVA KORIDORU</div>
+                            <div style={{ fontSize: '0.88rem', color: getTopoRiskColor(data.topo.airspace_risk), fontWeight: 800 }}>{data.topo.airspace_risk}</div>
+                            <div style={{ marginTop: '0.25rem', color: 'rgba(27,23,23,0.65)', fontSize: '0.68rem' }}>Fiziksel engel ve koridor bilgisi</div>
+                          </div>
+                        </div>
+
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: '0.8rem' }}>
+                          <div style={{ background: '#cecbbf', padding: '0.85rem', borderRadius: '4px' }}>
+                            <div style={{ fontSize: '0.55rem', fontWeight: 800, opacity: 0.7, marginBottom: '0.2rem' }}>TAMPON MESAFESI</div>
+                            <div style={{ fontSize: '0.9rem', fontWeight: 900, color: '#1B1717' }}>{formatTopoDistanceKm(data.topo.site_buffer_km)}</div>
+                          </div>
+                          <div style={{ background: '#cecbbf', padding: '0.85rem', borderRadius: '4px' }}>
+                            <div style={{ fontSize: '0.55rem', fontWeight: 800, opacity: 0.7, marginBottom: '0.2rem' }}>RISK CAPISI</div>
+                            <div style={{ fontSize: '0.9rem', fontWeight: 900, color: '#1B1717' }}>{formatTopoDistanceKm((Number(data.topo.risk_radius_m) || 0) / 1000)}</div>
+                          </div>
+                          <div style={{ background: '#cecbbf', padding: '0.85rem', borderRadius: '4px' }}>
+                            <div style={{ fontSize: '0.55rem', fontWeight: 800, opacity: 0.7, marginBottom: '0.2rem' }}>SU HATTI</div>
+                            <div style={{ fontSize: '0.9rem', fontWeight: 900, color: '#1B1717' }}>{formatTopoDistanceKm(data.topo.nearest_water_km)}</div>
+                          </div>
+                        </div>
                       </div>
-                      <div style={{ fontSize: '0.85rem', color: data.topo.civ_risk?.includes?.("RİSK") ? '#CE1212' : data.topo.civ_risk?.includes?.("AVANTAJ") ? '#a0a7a4ff' : '#1B1717', fontWeight: 700 }}>{data.topo.civ_risk}</div>
-                      <div style={{ marginTop: '0.2rem', color: 'rgba(27, 23, 23, 0.6)', fontSize: '0.65rem' }}>Yerleşim: {data.topo.residential} | Sanayi: {data.topo.industrial}</div>
-                    </div>
-
-                    <div className="data-group" style={{ background: '#cecbbf', padding: '0.8rem', borderRadius: '4px' }}>
-                      <div style={{ fontSize: '0.55rem', fontWeight: 800, color: '#1B1717', marginBottom: '0.3rem' }}>FİZİKSEL ENGEL SAPTAMA</div>
-                      <div style={{ fontSize: '0.85rem', color: data.topo.airspace_risk?.includes?.("DİKKAT") ? '#CE1212' : '#1B1717', fontWeight: 700 }}>{data.topo.airspace_risk}</div>
                     </div>
                   </div>
 
-                  <div className="card" style={{ background: '#cecbbf', padding: '1rem', borderRadius: '4px' }}>
-                    <div style={{ fontSize: '0.6rem', fontWeight: 900, letterSpacing: '2px', color: '#1B1717', marginBottom: '0.5rem' }}>NİHAİ BİLGİSAYAR KARARI</div>
-                    <div style={{ fontSize: '1.2rem', fontWeight: 900, color: (data.topo.suitability?.includes?.("KRİTİK") || data.topo.suitability?.includes?.("RED") || data.topo.suitability?.includes?.("DEĞİL")) ? '#CE1212' : '#1B1717' }}>
-                      {data.topo.suitability?.split?.(':')?.[0]}
+                  <div style={{ display: 'grid', gridTemplateRows: 'auto auto minmax(0, 1fr)', gap: '1rem', minHeight: 0 }}>
+                    <div className="card static-card" style={{ background: '#cecbbf', padding: '0.95rem', borderRadius: '4px' }}>
+                      <div style={{ fontSize: '0.58rem', fontWeight: 900, letterSpacing: '2px', color: '#1B1717', marginBottom: '0.45rem' }}>NIHAI KARAR</div>
+                      <div style={{ fontSize: '1.28rem', fontWeight: 900, color: getTopoDecisionColor(data.topo.launch_recommendation || data.topo.suitability), marginBottom: '0.2rem' }}>
+                        {data.topo.launch_recommendation || data.topo.suitability?.split?.(':')?.[0] || 'BEKLENIYOR'}
+                      </div>
+                      <div style={{ fontSize: '0.78rem', fontWeight: 800, color: '#1B1717', opacity: 0.85 }}>{data.topo.suitability}</div>
                     </div>
-                    <div style={{ fontSize: '0.75rem', fontWeight: 800, opacity: 0.8, color: '#1B1717' }}>{data.topo.suitability?.split?.(':')?.[1]}</div>
+
+                    <div className="card static-card" style={{ background: '#ffffff', padding: '1rem', borderRadius: '4px', border: '1px solid rgba(27,23,23,0.08)' }}>
+                      <div style={{ fontSize: '0.58rem', fontWeight: 900, letterSpacing: '2px', color: '#1B1717', marginBottom: '0.75rem' }}>SAHA UYGUNLUK OZETI</div>
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: '0.7rem' }}>
+                        <div style={{ background: '#cecbbf', padding: '0.75rem', borderRadius: '4px' }}>
+                          <div style={{ fontSize: '0.55rem', fontWeight: 800, opacity: 0.7, marginBottom: '0.2rem' }}>GRADE</div>
+                          <div style={{ fontSize: '1.2rem', fontWeight: 900, color: getTopoDecisionColor(data.topo.launch_recommendation || data.topo.suitability) }}>{data.topo.launch_grade || '-'}</div>
+                        </div>
+                        <div style={{ background: '#cecbbf', padding: '0.75rem', borderRadius: '4px' }}>
+                          <div style={{ fontSize: '0.55rem', fontWeight: 800, opacity: 0.7, marginBottom: '0.2rem' }}>GUVEN</div>
+                          <div style={{ fontSize: '1rem', fontWeight: 900, color: '#1B1717' }}>{data.topo.confidence || '-'}</div>
+                        </div>
+                        <div style={{ background: '#cecbbf', padding: '0.75rem', borderRadius: '4px' }}>
+                          <div style={{ fontSize: '0.55rem', fontWeight: 800, opacity: 0.7, marginBottom: '0.2rem' }}>SKOR</div>
+                          <div style={{ fontSize: '1rem', fontWeight: 900, color: '#1B1717' }}>{data.topo.score || '-'}</div>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="card custom-scroll static-card" style={{ background: '#ffffff', padding: '1rem', borderRadius: '4px', border: '1px solid rgba(27,23,23,0.08)', minHeight: 0, overflowY: 'auto' }}>
+                      <div style={{ fontSize: '0.58rem', fontWeight: 900, letterSpacing: '2px', color: '#1B1717', marginBottom: '0.7rem' }}>DETAYLI OZET</div>
+
+                      <div style={{ display: 'grid', gap: '0.7rem', marginBottom: '0.9rem' }}>
+                        <div style={{ background: '#cecbbf', padding: '0.75rem', borderRadius: '4px' }}>
+                          <div style={{ fontSize: '0.55rem', fontWeight: 800, color: '#1B1717', marginBottom: '0.25rem' }}>YERLESIM ETKISI</div>
+                          <div style={{ fontSize: '0.82rem', fontWeight: 800, color: getTopoRiskColor(data.topo.civ_risk) }}>{data.topo.civ_risk}</div>
+                          <div style={{ marginTop: '0.2rem', fontSize: '0.65rem', color: 'rgba(27,23,23,0.65)' }}>En yakin yerlesim: {formatTopoDistanceKm(data.topo.nearest_settlement_km)}</div>
+                        </div>
+                        <div style={{ background: '#cecbbf', padding: '0.75rem', borderRadius: '4px' }}>
+                          <div style={{ fontSize: '0.55rem', fontWeight: 800, color: '#1B1717', marginBottom: '0.25rem' }}>HAVA KORIDORU</div>
+                          <div style={{ fontSize: '0.82rem', fontWeight: 800, color: getTopoRiskColor(data.topo.airspace_risk) }}>{data.topo.airspace_risk}</div>
+                          <div style={{ marginTop: '0.2rem', fontSize: '0.65rem', color: 'rgba(27,23,23,0.65)' }}>Havaalani: {formatTopoDistanceKm(data.topo.nearest_airport_km)} | Su hatti: {formatTopoDistanceKm(data.topo.nearest_water_km)}</div>
+                        </div>
+                      </div>
+
+                      <div style={{ fontSize: '0.55rem', fontWeight: 800, color: '#1B1717', marginBottom: '0.35rem' }}>ANA KISITLAR</div>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem', marginBottom: '0.9rem' }}>
+                        {(Array.isArray(data.topo.primary_constraints) && data.topo.primary_constraints.length > 0 ? data.topo.primary_constraints : ['Analiz tamamlanmadi']).map((item, idx) => (
+                          <span key={idx} style={{ padding: '0.3rem 0.5rem', background: '#1B1717', color: '#EEEBDD', borderRadius: '999px', fontSize: '0.62rem', fontWeight: 800 }}>
+                            {item}
+                          </span>
+                        ))}
+                      </div>
+
+                      {optimalReport && (
+                        <div style={{ background: '#cecbbf', padding: '0.85rem', borderRadius: '4px' }}>
+                          <div style={{ fontSize: '0.55rem', fontWeight: 800, color: '#1B1717', marginBottom: '0.3rem' }}>OPTIMAL SENARYO</div>
+                          <div style={{ fontSize: '0.9rem', fontWeight: 900, color: '#1B1717', marginBottom: '0.25rem' }}>{optimalReport.base_name} ({optimalReport.score} puan)</div>
+                          <div style={{ fontSize: '0.72rem', fontWeight: 800, color: '#1B1717', marginBottom: '0.2rem' }}>Maks ruzgar: {optimalReport.safe_wind} m/s | Sicaklik: {optimalReport.req_temp} C</div>
+                          <div style={{ fontSize: '0.72rem', fontWeight: 800, color: '#1B1717', marginBottom: '0.5rem' }}>Basinc: {optimalReport.req_press} hPa | TWR: {optimalReport.twr}</div>
+                          <button onClick={() => generateOptimalPDFV2()} style={{ padding: '0.5rem 0.8rem', background: '#1B1717', color: 'white', border: 'none', borderRadius: '4px', fontWeight: 900, cursor: 'pointer', fontSize: '0.6rem' }}>
+                            OPTIMAL PDF RAPORU
+                          </button>
+                        </div>
+                      )}
+                    </div>
                   </div>
                 </div>
-              </div>
+              )}
             </div>
           )}
 
@@ -1594,27 +2540,39 @@ function App() {
               <div className="dashboard-grid" style={{ flex: 1, minHeight: 0, overflow: 'hidden', display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gridTemplateRows: 'repeat(2, 1fr)', gap: '1.2rem' }}>
                 <div className="card static-card" style={{ padding: '2rem', background: '#ffffff', borderRadius: '4px', overflow: 'hidden', display: 'flex', flexDirection: 'column', justifyContent: 'center', position: 'relative', gridColumn: 'span 1', gridRow: 'span 1' }}>
                   {/* Subtle Map Background */}
-                  <div style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 0, opacity: 0.15, filter: 'grayscale(100%) brightness(1.1)', pointerEvents: 'none' }}>
-                    {data.weather?.coord && data.weather.coord !== "-" && (
-                      <MapContainer
-                        key={data.weather.coord}
-                        center={[parseFloat(data.weather.coord.split(',')[0]), parseFloat(data.weather.coord.split(',')[1])]}
-                        zoom={11}
-                        zoomControl={false}
-                        dragging={false}
-                        scrollWheelZoom={false}
-                        doubleClickZoom={false}
-                        style={{ height: '100%', width: '100%' }}
-                      >
-                        <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
-                      </MapContainer>
-                    )}
+                  <div style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 0, opacity: 0.25, filter: 'grayscale(60%) brightness(1.2)', pointerEvents: 'none' }}>
+                    <MapContainer
+                      key={`${position.lat}-${position.lon}`}
+                      center={[position.lat, position.lon]}
+                      zoom={12}
+                      zoomControl={false}
+                      dragging={false}
+                      scrollWheelZoom={false}
+                      doubleClickZoom={false}
+                      style={{ height: '100%', width: '100%' }}
+                    >
+                      <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+                      <CircleMarker 
+                        center={[position.lat, position.lon]} 
+                        radius={8} 
+                        pathOptions={{ color: '#CE1212', fillColor: '#CE1212', fillOpacity: 1 }}
+                      />
+                      <Circle 
+                        center={[position.lat, position.lon]} 
+                        radius={2000} 
+                        pathOptions={{ color: '#CE1212', dashArray: '5, 10', fillOpacity: 0.1 }} 
+                      />
+                    </MapContainer>
                   </div>
 
                   <div style={{ position: 'relative', zIndex: 1001 }}>
-                    <div style={{ color: 'var(--primary-blue)', fontWeight: 900, fontSize: '0.7rem', letterSpacing: '2px', marginBottom: '0.8rem' }}>METEOROLOJİK MERKEZ</div>
-                    <div style={{ fontSize: '3rem', fontWeight: 900, color: '#1B1717', marginBottom: '0.5rem', lineHeight: 1.1 }}>{(data.weather?.city || "-").toUpperCase()}</div>
-                    <div style={{ color: '#64748b', fontWeight: 800, fontSize: '0.75rem' }}>KOORDİNAT: {data.weather?.coord || "-"}</div>
+                    <div style={{ color: '#CE1212', fontWeight: 900, fontSize: '0.7rem', letterSpacing: '2px', marginBottom: '0.8rem' }}>METEOROLOJİK MERKEZ</div>
+                    <div style={{ fontSize: '2.5rem', fontWeight: 900, color: '#1B1717', marginBottom: '0.5rem', lineHeight: 1.1 }}>
+                      {loadingWeather ? "VERİ ÇEKİLİYOR..." : (data.weather?.city && data.weather.city !== "-" ? data.weather.city : "KONUM SEÇİNİZ").toUpperCase()}
+                    </div>
+                    <div style={{ color: '#64748b', fontWeight: 800, fontSize: '0.8rem', fontFamily: 'monospace' }}>
+                      KOORDİNAT: {(data.weather?.coord && data.weather.coord !== "-") ? data.weather.coord : `${position.lat.toFixed(4)}, ${position.lon.toFixed(4)}`}
+                    </div>
                   </div>
 
 
@@ -1686,14 +2644,14 @@ function App() {
           {activeTab === 'space' && (
             <div className="tab-pane fade-in" style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
 
-              {/* 1. MİSSİON STATUS HUD - PRD Risk Level Integration */}
               <div style={{
-                background: (data.space.risk_level === "HIGH" || data.space.alert === "KIZIL") ? '#CE1212' :
-                  (data.space.risk_level === "MEDIUM" ? '#f59e0b' : '#cecbbf'),
+                background:
+                  (data.space.operation_status === 'NO_GO' || data.space.risk_level === 'HIGH' || data.space.alert === 'KIRMIZI') ? '#CE1212' :
+                  (data.space.operation_status === 'HOLD' || data.space.operation_status === 'REVIEW' || data.space.risk_level === 'MEDIUM') ? '#f59e0b' : '#cecbbf',
                 padding: '1.2rem 2rem',
                 borderRadius: '4px',
                 marginBottom: '1rem',
-                color: (data.space.risk_level === "HIGH" || data.space.risk_level === "MEDIUM") ? 'white' : '#1B1717',
+                color: (data.space.operation_status === 'NO_GO' || data.space.operation_status === 'HOLD' || data.space.operation_status === 'REVIEW' || data.space.risk_level !== 'LOW') ? 'white' : '#1B1717',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'space-between',
@@ -1701,62 +2659,81 @@ function App() {
                 flexShrink: 0
               }}>
                 <div>
-                  <div style={{ fontSize: '0.65rem', fontWeight: 900, opacity: 0.8, letterSpacing: '3px', marginBottom: '4px' }}>ELEKTROMANYETİK SPEKTRUM VE ANALİZ</div>
-                  <div style={{ fontSize: '1.8rem', fontWeight: 900, letterSpacing: '-0.5px' }}>
-                    {data.space.risk_level === "HIGH" ? "KRİTİK FIRTINA RİSKİ" :
-                      data.space.risk_level === "MEDIUM" ? "AKTİF TAKİP MODU" : "MANYETİK ALAN STABİL"}
+                  <div style={{ fontSize: '0.65rem', fontWeight: 900, opacity: 0.8, letterSpacing: '3px', marginBottom: '4px' }}>
+                    GUNES KAYNAKLI ELEKTROMANYETIK ERKEN UYARI SISTEMI
+                  </div>
+                  <div style={{ fontSize: '1.65rem', fontWeight: 900, letterSpacing: '-0.4px' }}>
+                    {
+                      data.space.operation_status === 'NO_GO' ? 'KRITIK UYARI: FIRLATMA DURDURULMALI' :
+                      data.space.operation_status === 'HOLD' ? 'ARTAN DALGALANMA: OPERASYON BEKLETILMELI' :
+                      data.space.operation_status === 'REVIEW' ? 'ERKEN UYARI: DETAYLI INCELEME GEREKLI' :
+                      'ELEKTROMANYETIK KOSULLAR KONTROLLU'
+                    }
                   </div>
                   <div style={{ marginTop: '5px', fontSize: '0.85rem', fontWeight: 700, background: 'rgba(0,0,0,0.1)', padding: '4px 10px', borderRadius: '4px', display: 'inline-block' }}>
-                    DURUM KODU: {data.space.event || "İZLENİYOR"}
+                    DURUM KODU: {data.space.event || 'IZLENIYOR'}
                   </div>
                 </div>
                 <div style={{ textAlign: 'right' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px', justifyContent: 'flex-end', marginBottom: '4px' }}>
-                    <div className="pulse-led" style={{ width: '10px', height: '10px', background: (data.space.risk_level === "HIGH" || data.space.risk_level === "MEDIUM") ? '#fff' : '#1B1717', borderRadius: '50%' }}></div>
-                    <div style={{ fontSize: '0.7rem', fontWeight: 900 }}>NOAA CANLI BAĞLANTI</div>
+                    <div className="pulse-led" style={{ width: '10px', height: '10px', background: (data.space.operation_status === 'GO' && data.space.risk_level === 'LOW') ? '#1B1717' : '#fff', borderRadius: '50%' }}></div>
+                    <div style={{ fontSize: '0.7rem', fontWeight: 900 }}>{data.space.source_mode || 'IZLEME KAYNAGI'}</div>
                   </div>
-                  <div style={{ fontSize: '0.65rem', opacity: 0.7 }}>SİSTEM GÜNCEL // {currentTime}</div>
+                  <div style={{ fontSize: '0.65rem', opacity: 0.75 }}>BAGLANTI: {data.space.network_ok ? 'CANLI' : 'FALLBACK'} // {currentTime}</div>
                 </div>
               </div>
 
-              <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.2fr) 350px', gap: '1rem', flex: 1, minHeight: 0 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.2fr) 360px', gap: '1rem', flex: 1, minHeight: 0 }}>
 
-                {/* SOL PANEL: ANA METRİKLER VE GRAFİK */}
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', minHeight: 0 }}>
                   <div className="grid-3" style={{ gap: '1rem' }}>
-                    {/* Kp Index */}
                     <div className="card" style={{ padding: '1.2rem', textAlign: 'center', background: '#ffffff', borderRadius: '4px' }}>
-                      <div style={{ fontSize: '0.6rem', fontWeight: 900, color: 'var(--text-secondary)', marginBottom: '0.8rem' }}>PLANETARY K-INDEX</div>
-                      <div style={{ fontSize: '3rem', fontWeight: 900, color: data.space.kp_index >= 5 ? '#CE1212' : '#1B1717' }}>{data.space.kp_index}</div>
-                      <div style={{ fontSize: '0.7rem', fontWeight: 800, color: data.space.kp_index >= 5 ? '#CE1212' : '#10b981' }}>
-                        {data.space.kp_index >= 7 ? "ŞİDDETLİ FIRTINA" : (data.space.kp_index >= 5 ? "FIRTINA" : "STABİL")}
+                      <div style={{ fontSize: '0.6rem', fontWeight: 900, color: 'var(--text-secondary)', marginBottom: '0.8rem' }}>JEOMANYETIK K-INDEX</div>
+                      <div style={{ fontSize: '3rem', fontWeight: 900, color: Number(data.space.kp_index) >= 5 ? '#CE1212' : '#1B1717' }}>{data.space.kp_index}</div>
+                      <div style={{ fontSize: '0.7rem', fontWeight: 800, color: Number(data.space.kp_index) >= 5 ? '#CE1212' : '#10b981' }}>
+                        {Number(data.space.kp_index) >= 7 ? 'SIDDETLI FIRTINA' : (Number(data.space.kp_index) >= 5 ? 'FIRTINA' : 'DUSUK AKTIVITE')}
                       </div>
                     </div>
 
-                    {/* Solar Flare */}
                     <div className="card" style={{ padding: '1.2rem', textAlign: 'center', background: '#ffffff', borderRadius: '4px' }}>
-                      <div style={{ fontSize: '0.6rem', fontWeight: 900, color: 'var(--text-secondary)', marginBottom: '0.8rem' }}>SOLAR X-RAY FLUX</div>
+                      <div style={{ fontSize: '0.6rem', fontWeight: 900, color: 'var(--text-secondary)', marginBottom: '0.8rem' }}>GUNES FLARE AKISI</div>
                       <div style={{ fontSize: '3rem', fontWeight: 900, color: data.space.solar_flare === 'X' ? '#CE1212' : (data.space.solar_flare === 'M' ? '#f59e0b' : '#1B1717') }}>
-                        {data.space.solar_flare}{data.space.flare_intensity}
+                        {data.space.xray_flux || `${data.space.solar_flare}${data.space.flare_intensity}`}
                       </div>
-                      <div style={{ fontSize: '0.7rem', fontWeight: 800, color: 'var(--text-secondary)' }}>SINIFLANDIRMA</div>
+                      <div style={{ fontSize: '0.7rem', fontWeight: 800, color: 'var(--text-secondary)' }}>X-RAY ETKISI</div>
                     </div>
 
-                    {/* Risk Level */}
                     <div className="card" style={{ padding: '1.2rem', textAlign: 'center', background: '#ffffff', borderRadius: '4px' }}>
-                      <div style={{ fontSize: '0.6rem', fontWeight: 900, color: 'var(--text-secondary)', marginBottom: '0.8rem' }}>SİSTEM RİSK SEVİYESİ</div>
-                      <div style={{ fontSize: '2.5rem', fontWeight: 900, color: data.space.risk_level === "HIGH" ? '#CE1212' : (data.space.risk_level === "MEDIUM" ? '#f59e0b' : '#10b981') }}>
-                        {data.space.risk_level}
+                      <div style={{ fontSize: '0.6rem', fontWeight: 900, color: 'var(--text-secondary)', marginBottom: '0.8rem' }}>OPERASYON KARARI</div>
+                      <div style={{ fontSize: '2.5rem', fontWeight: 900, color: data.space.operation_status === 'NO_GO' ? '#CE1212' : (data.space.operation_status === 'HOLD' || data.space.operation_status === 'REVIEW' ? '#f59e0b' : '#10b981') }}>
+                        {data.space.operation_status || 'GO'}
                       </div>
-                      <div style={{ fontSize: '0.7rem', fontWeight: 800, color: 'var(--text-secondary)' }}>PRD STANDART ANALİZİ</div>
+                      <div style={{ fontSize: '0.7rem', fontWeight: 800, color: 'var(--text-secondary)' }}>ERKEN UYARI CIKTISI</div>
                     </div>
                   </div>
 
-                  {/* Geçmiş Veri Listesi (PRD History requirement) */}
+                  <div className="grid-3" style={{ gap: '1rem' }}>
+                    <div className="card" style={{ padding: '1rem', background: '#ffffff', borderRadius: '4px' }}>
+                      <div style={{ fontSize: '0.58rem', fontWeight: 900, color: 'var(--text-secondary)', marginBottom: '0.55rem' }}>ILETISIM RISKI</div>
+                      <div style={{ fontSize: '1.5rem', fontWeight: 900, color: data.space.communication_risk === 'CRITICAL' || data.space.communication_risk === 'HIGH' ? '#CE1212' : (data.space.communication_risk === 'MEDIUM' ? '#f59e0b' : '#10b981') }}>{data.space.communication_risk}</div>
+                      <div style={{ fontSize: '0.72rem', color: '#64748b', fontWeight: 700 }}>HF ve komuta baglantisi etkisi</div>
+                    </div>
+                    <div className="card" style={{ padding: '1rem', background: '#ffffff', borderRadius: '4px' }}>
+                      <div style={{ fontSize: '0.58rem', fontWeight: 900, color: 'var(--text-secondary)', marginBottom: '0.55rem' }}>NAVIGASYON RISKI</div>
+                      <div style={{ fontSize: '1.5rem', fontWeight: 900, color: data.space.navigation_risk === 'CRITICAL' || data.space.navigation_risk === 'HIGH' ? '#CE1212' : (data.space.navigation_risk === 'MEDIUM' ? '#f59e0b' : '#10b981') }}>{data.space.navigation_risk}</div>
+                      <div style={{ fontSize: '0.72rem', color: '#64748b', fontWeight: 700 }}>GNSS ve izleme kararliligi</div>
+                    </div>
+                    <div className="card" style={{ padding: '1rem', background: '#ffffff', borderRadius: '4px' }}>
+                      <div style={{ fontSize: '0.58rem', fontWeight: 900, color: 'var(--text-secondary)', marginBottom: '0.55rem' }}>RADYASYON RISKI</div>
+                      <div style={{ fontSize: '1.5rem', fontWeight: 900, color: data.space.radiation_risk === 'CRITICAL' || data.space.radiation_risk === 'HIGH' ? '#CE1212' : (data.space.radiation_risk === 'MEDIUM' ? '#f59e0b' : '#10b981') }}>{data.space.radiation_risk}</div>
+                      <div style={{ fontSize: '0.72rem', color: '#64748b', fontWeight: 700 }}>Aviyonik ve faydali yuk etkisi</div>
+                    </div>
+                  </div>
+
                   <div className="card" style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, padding: '1.2rem', borderRadius: '4px' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '1rem', alignItems: 'center' }}>
-                      <div className="card-title" style={{ fontSize: '0.9rem' }}>Telemetri Geçmişi (Son 50 Veri)</div>
-                      <div style={{ fontSize: '0.6rem', background: '#cecbbf', padding: '2px 8px', borderRadius: '4px', fontWeight: 900 }}>REAL-TIME LOG</div>
+                      <div className="card-title" style={{ fontSize: '0.9rem' }}>Elektromanyetik Erken Uyari Gecmisi</div>
+                      <div style={{ fontSize: '0.6rem', background: '#cecbbf', padding: '2px 8px', borderRadius: '4px', fontWeight: 900 }}>SON 50 KAYIT</div>
                     </div>
                     <div style={{ flex: 1, overflowY: 'auto' }} className="custom-scroll">
                       <table style={{ width: '100%', fontSize: '0.75rem', borderCollapse: 'collapse' }}>
@@ -1766,6 +2743,7 @@ function App() {
                             <th style={{ padding: '8px' }}>Kp</th>
                             <th style={{ padding: '8px' }}>Flare</th>
                             <th style={{ padding: '8px' }}>Risk</th>
+                            <th style={{ padding: '8px' }}>Karar</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -1788,60 +2766,72 @@ function App() {
                               <td style={{ padding: '6px 8px', fontWeight: 900, color: item.risk_level === 'HIGH' ? '#CE1212' : (item.risk_level === 'MEDIUM' ? '#f59e0b' : '#10b981') }}>
                                 {item.risk_level || item.risk}
                               </td>
+                              <td style={{ padding: '6px 8px', fontWeight: 800 }}>{item.operation_status || '-'}</td>
                             </tr>
                           ))}
-                          {!data.space.history || data.space.history.length === 0 ? <tr><td colSpan="4" style={{ textAlign: 'center', padding: '1rem', color: '#64748b' }}>Henüz veri toplanmadı...</td></tr> : null}
+                          {!data.space.history || data.space.history.length === 0 ? <tr><td colSpan="5" style={{ textAlign: 'center', padding: '1rem', color: '#64748b' }}>Henuz veri toplanmadi...</td></tr> : null}
                         </tbody>
                       </table>
                     </div>
                   </div>
                 </div>
 
-                {/* SAĞ PANEL: UYARILAR VE AI YORUMU */}
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', minHeight: 0 }}>
                   <div className="card static-card" style={{ background: '#1B1717', color: '#EEEBDD', padding: '1.2rem', borderRadius: '4px' }}>
-                    <div style={{ fontSize: '0.65rem', fontWeight: 900, letterSpacing: '2px', color: '#f59e0b', marginBottom: '0.8rem' }}>AI STRATEJİK YORUMU</div>
-                    <div style={{ fontSize: '0.9rem', lineHeight: '1.5', fontFamily: 'monospace', color: '#38bdf8' }}>{data.space.ai_consensus}</div>
+                    <div style={{ fontSize: '0.65rem', fontWeight: 900, letterSpacing: '2px', color: '#f59e0b', marginBottom: '0.8rem' }}>OPERASYONEL ERKEN UYARI YORUMU</div>
+                    <div style={{ fontSize: '0.9rem', lineHeight: '1.5', fontFamily: 'monospace', color: '#38bdf8', marginBottom: '0.8rem' }}>{data.space.ai_consensus}</div>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.6rem', fontSize: '0.72rem', color: '#cbd5e1', fontFamily: 'monospace' }}>
+                      <div>KAYNAK: {data.space.source_mode || '-'}</div>
+                      <div>UYDU RISKI: {data.space.satellite_risk || '-'}</div>
+                      <div>JEOMANYETIK DURUM: {data.space.geomagnetic_condition || '-'}</div>
+                      <div>GUNES RUZGARI: {data.space.sw_speed || '-'}</div>
+                    </div>
                   </div>
 
                   <LiveTelemetryStream />
 
-                  <div className="card static-card" style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, padding: '1.2rem', borderRadius: '4px' }}>
-                    <div style={{ fontSize: '0.7rem', fontWeight: 900, color: '#CE1212', marginBottom: '1rem', paddingBottom: '0.5rem', display: 'flex', alignItems: 'center', gap: '5px' }}>
-                      <WarningIcon fontSize="small" /> NOAA AKTİF UYARILAR
+                  <div className="card static-card" style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, padding: '1.2rem', borderRadius: '4px', border: '1px solid rgba(206, 18, 18, 0.1)' }}>
+                    <div style={{ fontSize: '0.7rem', fontWeight: 900, color: '#CE1212', marginBottom: '1rem', paddingBottom: '0.5rem', borderBottom: '1px solid #fee2e2', display: 'flex', alignItems: 'center', gap: '5px' }}>
+                      <WarningIcon fontSize="small" style={{ animation: 'pulse 1.5s infinite' }} /> GUNES ETKISI VE NOAA UYARILARI
                     </div>
-                    <div style={{ flex: 1, overflowY: 'auto' }} className="custom-scroll">
-                      {data.space.active_alerts && data.space.active_alerts.map((alert, idx) => (
-                        <div key={idx} style={{
-                          padding: '10px',
-                          background: '#fef2f2',
-                          borderRadius: '4px',
-                          marginBottom: '8px',
-                          fontSize: '0.7rem',
-                          fontFamily: 'monospace',
-                          lineHeight: '1.4'
-                        }}>
-                          {alert}
-                        </div>
-                      ))}
-                      {(!data.space.active_alerts || data.space.active_alerts.length === 0) && (
-                        <div style={{ textAlign: 'center', color: '#64748b', fontSize: '0.8rem', paddingTop: '2rem' }}>
-                          Aktif tehlike uyarısı bulunmuyor.
+                    <div style={{ flex: 1, overflowY: 'auto', paddingRight: '5px' }} className="custom-scroll">
+                      {data.space.active_alerts && data.space.active_alerts.length > 0 ? (
+                        data.space.active_alerts.map((alert, idx) => (
+                          <div key={idx} style={{
+                            padding: '12px',
+                            background: '#fff1f2',
+                            borderLeft: '4px solid #CE1212',
+                            borderRadius: '2px',
+                            marginBottom: '10px',
+                            fontSize: '0.75rem',
+                            fontFamily: 'monospace',
+                            lineHeight: '1.6',
+                            color: '#451a03',
+                            boxShadow: '0 2px 5px rgba(0,0,0,0.02)',
+                            wordBreak: 'break-word',
+                            whiteSpace: 'pre-wrap'
+                          }}>
+                            {typeof alert === 'object' ? (alert.summary || alert.message || JSON.stringify(alert)) : alert}
+                          </div>
+                        ))
+                      ) : (
+                        <div style={{ textAlign: 'center', color: '#94a3b8', fontSize: '0.75rem', padding: '3rem 1rem', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '10px' }}>
+                          <ShieldIcon style={{ opacity: 0.3, fontSize: '2rem' }} />
+                          <div>Aktif elektromanyetik tehlike uyarisi bulunmuyor.<br /><span style={{ fontSize: '0.6rem', opacity: 0.7 }}>Erken uyari sistemi nominal calisiyor.</span></div>
                         </div>
                       )}
                     </div>
                   </div>
 
                   <div className="card static-card" style={{ background: '#cecbbf', padding: '1rem', borderRadius: '4px' }}>
-                    <div style={{ fontSize: '0.6rem', fontWeight: 900, color: '#1B1717' }}>SONRAKİ PENCERE TAHMİNİ</div>
-                    <div style={{ fontSize: '1.1rem', fontWeight: 900, color: '#1B1717', marginTop: '4px' }}>{data.space.next_window || "İZLENİYOR"}</div>
+                    <div style={{ fontSize: '0.6rem', fontWeight: 900, color: '#1B1717' }}>ONERILEN OPERASYON PENCERESI</div>
+                    <div style={{ fontSize: '1.1rem', fontWeight: 900, color: '#1B1717', marginTop: '4px' }}>{data.space.next_window || 'IZLENIYOR'}</div>
                   </div>
                 </div>
 
               </div>
             </div>
           )}
-
           {/* HAVA SAHASI VE NOTAM SEKMESİ (Taktik Harita Dahil) */}
           {activeTab === 'airspace' && (
             <div className="tab-pane fade-in" style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
@@ -2165,11 +3155,11 @@ function App() {
                       <div className="card" style={{ borderRadius: '4px', padding: '1.5rem', marginBottom: '15rem' }}>
                         <div className="card-subtitle" style={{ letterSpacing: '2px', color: '#CE1212', fontWeight: 'bold', marginBottom: '1rem' }}>TETRATECH KESİN KARAR MOTORU</div>
                         <div style={{ display: 'flex', gap: '1rem' }}>
-                          <button onClick={() => handleCalculateOptimal(false)} disabled={calculatingOptimal} style={{ flex: 1, padding: '1rem', background: '#CE1212', color: 'white', border: 'none', borderRadius: '4px', fontWeight: 900, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', letterSpacing: '1px' }}>
+                          <button onClick={() => handleCalculateOptimalV2()} disabled={calculatingOptimal} style={{ flex: 1, padding: '1rem', background: '#CE1212', color: 'white', border: 'none', borderRadius: '4px', fontWeight: 900, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', letterSpacing: '1px' }}>
                             <SettingsIcon /> {calculatingOptimal ? 'MOTOR ÇALIŞIYOR...' : 'EN UYGUN FIRLATMA KOŞULLARINI HESAPLA'}
                           </button>
                           {optimalReport && (
-                            <button onClick={generateOptimalPDF} style={{ padding: '1rem', background: '#1B1717', color: 'white', border: 'none', borderRadius: '4px', fontWeight: 900, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                            <button onClick={() => generateOptimalPDFV2()} style={{ padding: '1rem', background: '#1B1717', color: 'white', border: 'none', borderRadius: '4px', fontWeight: 900, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                               <PictureAsPdfIcon /> PDF AL
                             </button>
                           )}
@@ -2236,7 +3226,7 @@ function App() {
                     <div style={{ fontSize: '0.85rem', color: 'rgba(27,23,23,0.6)', marginBottom: '2rem' }}>Simülasyon için kullanılacak uzay aracını envantardan seçin.</div>
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: '1rem', overflowY: 'auto', flex: 1 }} className="custom-scroll">
                       {rockets.map(r => (
-                        <div key={r.id} onClick={() => setSimRocket(r)} style={{ padding: '1.5rem', borderRadius: '4px', cursor: 'pointer', transition: '0.2s', background: simRocket?.id === r.id ? '#CE1212' : '#cecbbf', color: simRocket?.id === r.id ? 'white' : '#1B1717' }}>
+                        <div key={r.id} onClick={() => { setSimRocket(r); setSimResult(null); setSimFlightResult(null); setSimDebrisResult(null); }} style={{ padding: '1.5rem', borderRadius: '4px', cursor: 'pointer', transition: '0.2s', background: simRocket?.id === r.id ? '#CE1212' : '#cecbbf', color: simRocket?.id === r.id ? 'white' : '#1B1717' }}>
                           <div style={{ fontSize: '1.1rem', fontWeight: 900 }}>{r.name}</div>
                           <div style={{ fontSize: '0.7rem', fontWeight: 700, opacity: 0.8, marginTop: '0.3rem' }}>{r.class}</div>
                           <div style={{ fontSize: '0.65rem', marginTop: '0.5rem', opacity: 0.7 }}>Payload: {r.payload}</div>
@@ -2292,8 +3282,8 @@ function App() {
                       <div style={{ display: 'flex', gap: '1rem' }}>
                         <button className="btn-primary" onClick={() => setSimStep(2)} style={{ flex: 1, height: '50px', fontSize: '0.85rem', background: '#cecbbf', color: '#1B1717', borderRadius: '4px' }}>← GERİ</button>
                         <button className="btn-primary" disabled={!simLive && (!simDate || !simTime)} onClick={async () => {
-                          setSimLoading(true); setSimStep(4);
-                          
+                          setSimLoading(true); setSimResult(null); setSimStep(4);
+
                           setSimProgressText('Çevre ve Hava Sahası Analiz Ediliyor...');
                           let currentResult = null;
                           try {
@@ -2323,39 +3313,42 @@ function App() {
 
                           setSimProgressText('Fizik ve Balistik Uçuş Modeli Çalıştırılıyor...');
                           try {
-                             const windSpd = currentResult?.weather_forecast?.wind_speed || 5;
-                             const temp = currentResult?.weather_forecast?.temp || 15;
-                             const press = currentResult?.weather_forecast?.pressure || 1013;
-                             
-                             let defaultParts = [
-                                { id: 'stage1', type: 'motor', name: '1. Kademe', dryMass: parseFloat(simRocket.dry_mass) * 0.4 || 120, fuelMass: parseFloat(simRocket.dry_mass) * 1.5 || 400, thrust: parseFloat(simRocket.thrust) || 15000, burnTime: 20, sepAlt: 3000, cd: 0.45, diameter: parseFloat(simRocket.diameter)||0.30 },
-                                { id: 'payload', type: 'payload', name: 'Burun Konisi', dryMass: parseFloat(simRocket.payload) || 15, cd: 0.25, diameter: parseFloat(simRocket.diameter)||0.15, fuelMass: 0, thrust: 0, burnTime: 0, sepAlt: 0 }
-                             ];
-                             const parts = simRocket.orkParts || defaultParts;
-                             
-                             const simPayload = { windSpeed: parseFloat(windSpd), temperature: parseFloat(temp), pressure: parseFloat(press), parts: parts };
-                             const fb = await fetch(simUrl('/simulate'), { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(simPayload)});
-                             const rawFlightRes = await fb.json();
-                             if(rawFlightRes && rawFlightRes.ozet) {
-                               setSimFlightResult({
-                                  metrics: {
-                                     maxAlt: rawFlightRes.ozet.maks_irtifa_m || 0,
-                                     maxVel: rawFlightRes.ozet.maks_hiz_ms || 0,
-                                     t: rawFlightRes.ozet.toplam_ucus_suresi_s || 0,
-                                     maxQ: (rawFlightRes.ozet.maks_ivme_ms2 || 0) * 100 // mapped as Accel proxy
-                                  }
-                               });
-                             } else {
-                               setSimFlightResult(null);
-                             }
-                          } catch(e) { console.error('Flight sim fail', e); setSimFlightResult(null); }
+                            const windSpd = currentResult?.weather_forecast?.wind_speed || 5;
+                            const temp = currentResult?.weather_forecast?.temp || 15;
+                            const press = currentResult?.weather_forecast?.pressure || 1013;
 
-                          setSimProgressText('Hermes AI ile Enkaz Analizi Hesaplanıyor...');
+                            const rkt = currentResult?.rocket || simRocket;
+                            const parts = buildMissionStageParts(rkt);
+
+                            const simPayload = { windSpeed: parseFloat(windSpd), temperature: parseFloat(temp), pressure: parseFloat(press), parts };
+                            const fb = await fetch(simUrl('/simulate'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(simPayload) });
+                            const rawFlightRes = await fb.json();
+                            if (rawFlightRes && rawFlightRes.ozet) {
+                              const trajectory = Array.isArray(rawFlightRes.trajectory) ? rawFlightRes.trajectory : [];
+                              const maxQ = trajectory.reduce((max, frame) => Math.max(max, Number(frame?.q) || 0), 0);
+                              const maxMach = trajectory.reduce((max, frame) => Math.max(max, Number(frame?.mach) || 0), 0);
+                              const maxX = trajectory.reduce((max, frame) => Math.max(max, Math.abs(Number(frame?.x) || 0)), 0);
+                              setSimFlightResult({
+                                metrics: {
+                                  maxAlt: rawFlightRes.ozet.maks_irtifa_m || 0,
+                                  maxVel: rawFlightRes.ozet.maks_hiz_ms || 0,
+                                  t: rawFlightRes.ozet.toplam_ucus_suresi_s || 0,
+                                  maxQ: maxQ || ((rawFlightRes.ozet.maks_ivme_ms2 || 0) * 100),
+                                  mach: maxMach,
+                                  xDist: maxX,
+                                }
+                              });
+                            } else {
+                              setSimFlightResult(null);
+                            }
+                          } catch (e) { console.error('Flight sim fail', e); setSimFlightResult(null); }
+
+                          setSimProgressText('Tetra Assistant ile Enkaz Analizi Hesaplanıyor...');
                           try {
-                              const res = await fetch(apiUrl(`/hermes/predict?rocket_model=${encodeURIComponent(simRocket.name)}&lat=${simBase.lat}&lon=${simBase.lon}&azimuth=90`));
-                              const data = await res.json();
-                              setSimDebrisResult(data);
-                          } catch(e) { console.error('Debris sim fail', e); setSimDebrisResult(null); }
+                            const res = await fetch(apiUrl(`/hermes/predict?rocket_model=${encodeURIComponent(simRocket.name)}&lat=${simBase.lat}&lon=${simBase.lon}&azimuth=90`));
+                            const data = await res.json();
+                            setSimDebrisResult(data);
+                          } catch (e) { console.error('Debris sim fail', e); setSimDebrisResult(null); }
 
                           setSimProgressText('');
                           setSimLoading(false);
@@ -2375,7 +3368,7 @@ function App() {
                         <div style={{ fontSize: '1.5rem', fontWeight: 900, marginBottom: '0.5rem' }}>SİMÜLASYON SUNUCULARI ÇALIŞIYOR...</div>
                         <div style={{ fontSize: '0.85rem', color: 'rgba(27,23,23,0.6)', marginBottom: '1rem' }}>{simProgressText}</div>
                         <div style={{ width: '200px', height: '4px', background: 'rgba(27,23,23,0.1)', borderRadius: '2px', overflow: 'hidden' }}>
-                           <div style={{ height: '100%', width: '30%', background: '#CE1212', animation: 'slideRight 1s infinite linear' }} />
+                          <div style={{ height: '100%', width: '30%', background: '#CE1212', animation: 'slideRight 1s infinite linear' }} />
                         </div>
                       </div>
                     ) : simResult ? (
@@ -2388,15 +3381,16 @@ function App() {
                           <div style={{ fontSize: '0.9rem', color: '#64748b', lineHeight: 1.6, marginBottom: '2.5rem' }}>
                             Taktiksel konumlandırma, uzay hava durumu ve balistik projeksiyon işlemleri tamamlandı. Görevin tam simülasyonuna geçmek için yetkilendirilmiş uçuş onayınızı verin.
                           </div>
-                          
+
                           <button onClick={() => {
                             if (simRocket && simResult) {
                               localStorage.setItem('tt_mission_lock', JSON.stringify({
                                 rocket: simRocket,
-                                weather: simResult.weather_forecast,
+                                weather: simResult.weather_forecast || simResult.weather || {},
                                 base: simBase
                               }));
                               window.dispatchEvent(new Event('storage'));
+                              // Mevcut tab içinde kal, sadece adımı ilerlet!
                               setSimStep(5);
                             }
                           }} style={{ width: '100%', padding: '1.2rem', background: '#CE1212', color: 'white', borderRadius: '4px', fontSize: '1rem', fontWeight: 900, cursor: 'pointer', border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px', boxShadow: '0 8px 15px rgba(206,18,18,0.2)' }}>
@@ -2419,7 +3413,7 @@ function App() {
                       </button>
                     </div>
                     <div style={{ flex: 1, position: 'relative', display: 'flex', minHeight: 0 }}>
-                      <RocketSimPage />
+                      <RocketSimPage isMissionMode={true} />
                     </div>
                   </div>
                 )}
@@ -2428,17 +3422,271 @@ function App() {
                   <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
                     <div style={{ background: '#1B1717', color: 'white', padding: '1rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0 }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '10px', fontSize: '1.2rem', fontWeight: 900, letterSpacing: '1px' }}>
+                        <MapIcon style={{ color: '#38bdf8' }} /> CANLI ENKAZ TESPITI - HERMES (ADIM 5/6)
+                      </div>
+                      <button onClick={() => setSimStep(7)} style={{ background: '#CE1212', color: 'white', border: 'none', padding: '10px 20px', borderRadius: '4px', cursor: 'pointer', fontWeight: 900, display: 'flex', alignItems: 'center', gap: '8px', boxShadow: '0 4px 10px rgba(206,18,18,0.3)' }}>
+                        <DescriptionIcon /> NIHAI RAPOR VE SONUCLAR
+                      </button>
+                    </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.5rem', flex: 1, minHeight: 0, paddingTop: '1.5rem' }}>
+                      <div className="card" style={{ padding: 0, overflow: 'hidden', borderRadius: '4px', position: 'relative', display: 'flex', flexDirection: 'column' }}>
+                        <div style={{ padding: '1rem 1.5rem', background: '#1B1717', color: 'white', fontSize: '0.75rem', fontWeight: 900, letterSpacing: '2px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <span>ENKAZ DUSUS HARITASI</span>
+                          <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
+                            <span style={{ color: '#f59e0b', fontSize: '0.6rem', fontWeight: 700 }}>Gorev verisinden otomatik uretildi</span>
+                            {simDebrisResult && <span style={{ color: '#4ade80', fontSize: '0.65rem' }}>MOTOR: {simDebrisResult.method}</span>}
+                          </div>
+                        </div>
+                        <div style={{ flex: 1 }}>
+                          <MapContainer center={[simBase.lat, simBase.lon]} zoom={3} minZoom={2} maxBounds={[[-85, -180], [85, 180]]} maxBoundsViscosity={1.0} style={{ height: '100%', width: '100%' }}>
+                            <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" noWrap={true} />
+                            <Marker position={[simBase.lat, simBase.lon]}>
+                              <Popup><strong>FIRLATMA NOKTASI</strong><br />{simBase.name}<br />{simBase.lat.toFixed(4)}N / {simBase.lon.toFixed(4)}E</Popup>
+                            </Marker>
+                            {simDebrisResult && Array.isArray(simDebrisResult.impact_zones) && simDebrisResult.impact_zones.filter(z => z && !isNaN(z.lat) && !isNaN(z.lon)).map((zone, i) => (
+                              <CircleMarker key={i} center={[Number(zone.lat), Number(zone.lon)]} radius={zone.risk_level === 'YUKSEK' ? 14 : zone.risk_level === 'KRITIK' ? 18 : 10} pathOptions={{ color: zone.risk_level === 'YUKSEK' ? '#CE1212' : zone.risk_level === 'KRITIK' ? '#CE1212' : '#f59e0b', fillColor: zone.risk_level === 'YUKSEK' ? '#CE1212' : zone.risk_level === 'KRITIK' ? '#CE1212' : '#22c55e', fillOpacity: 0.5, weight: 2 }}>
+                                <Popup>
+                                  <strong>{zone.stage_num}. Asama: {zone.name}</strong><br />
+                                  Menzil: {zone.downrange_km} km<br />
+                                  Kutle: {zone.mass_kg?.toLocaleString() || '0'} kg<br />
+                                  Bertaraf: {zone.disposal || 'Bilinmiyor'}<br />
+                                  Risk: {zone.risk_level || 'Normal'}
+                                </Popup>
+                              </CircleMarker>
+                            ))}
+                          </MapContainer>
+                        </div>
+                      </div>
+
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', overflowY: 'auto', minHeight: 0 }} className="custom-scroll">
+                        <div className="card" style={{ borderRadius: '4px', padding: '1.5rem' }}>
+                          <div className="card-subtitle" style={{ letterSpacing: '2px', color: 'var(--primary-blue)', fontWeight: 'bold', marginBottom: '1rem' }}>GOREV PARAMETRELERI</div>
+                          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                            <div>
+                              <label style={{ fontSize: '0.65rem', fontWeight: 800, color: '#64748b', display: 'block', marginBottom: '4px' }}>ROKET MODELI</label>
+                              <div style={{ width: '100%', padding: '10px 14px', height: '42px', borderRadius: '4px', background: 'white', color: '#1B1717', fontWeight: 700, boxSizing: 'border-box' }}>{simRocket?.name || '-'}</div>
+                            </div>
+                            <div>
+                              <label style={{ fontSize: '0.65rem', fontWeight: 800, color: '#64748b', display: 'block', marginBottom: '4px' }}>FIRLATMA USSU</label>
+                              <div style={{ width: '100%', padding: '10px 14px', height: '42px', borderRadius: '4px', background: 'white', color: '#1B1717', fontWeight: 700, boxSizing: 'border-box' }}>{simBase?.name || '-'}</div>
+                            </div>
+                            <div>
+                              <label style={{ fontSize: '0.65rem', fontWeight: 800, color: '#64748b', display: 'block', marginBottom: '4px' }}>FIRLATMA ENLEMI</label>
+                              <div style={{ width: '100%', padding: '10px 14px', height: '42px', borderRadius: '4px', background: 'white', color: '#1B1717', fontWeight: 700, boxSizing: 'border-box' }}>{simBase?.lat?.toFixed(4) || '-'}</div>
+                            </div>
+                            <div>
+                              <label style={{ fontSize: '0.65rem', fontWeight: 800, color: '#64748b', display: 'block', marginBottom: '4px' }}>FIRLATMA BOYLAMI</label>
+                              <div style={{ width: '100%', padding: '10px 14px', height: '42px', borderRadius: '4px', background: 'white', color: '#1B1717', fontWeight: 700, boxSizing: 'border-box' }}>{simBase?.lon?.toFixed(4) || '-'}</div>
+                            </div>
+                            <div>
+                              <label style={{ fontSize: '0.65rem', fontWeight: 800, color: '#64748b', display: 'block', marginBottom: '4px' }}>AZIMUT (derece)</label>
+                              <div style={{ width: '100%', padding: '10px 14px', height: '42px', borderRadius: '4px', background: 'white', color: '#1B1717', fontWeight: 700, boxSizing: 'border-box' }}>90</div>
+                            </div>
+                            <div>
+                              <label style={{ fontSize: '0.65rem', fontWeight: 800, color: '#64748b', display: 'block', marginBottom: '4px' }}>HERMES DURUMU</label>
+                              <div style={{ width: '100%', padding: '10px 14px', height: '42px', borderRadius: '4px', background: simDebrisResult ? '#1B1717' : '#cecbbf', color: simDebrisResult ? 'white' : '#1B1717', fontWeight: 900, boxSizing: 'border-box' }}>{simDebrisResult ? 'ANALIZ HAZIR' : 'VERI BEKLENIYOR'}</div>
+                            </div>
+                          </div>
+                        </div>
+
+                        {simDebrisResult && (
+                          <div className="card" style={{ borderRadius: '4px', padding: '1.5rem' }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+                              <div className="card-subtitle" style={{ letterSpacing: '2px', color: 'var(--primary-blue)', fontWeight: 'bold', margin: 0 }}>ASAMA BAZLI ENKAZ TAHMINI</div>
+                              <button onClick={generateDebrisPDF} style={{ padding: '6px 12px', background: '#CE1212', color: 'white', border: 'none', borderRadius: '4px', fontWeight: 900, cursor: 'pointer', fontSize: '0.6rem', letterSpacing: '1px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                <ArticleIcon style={{ fontSize: '0.8rem' }} /> RAPOR AL (PDF)
+                              </button>
+                            </div>
+                            <div style={{ fontSize: '0.7rem', color: '#64748b', marginBottom: '1rem' }}>Roket: <strong>{simDebrisResult.rocket || simRocket?.name || '-'}</strong> | Yakit: {simDebrisResult.propellant || '-'} | Guven: {simDebrisResult.confidence || '-'} | Motor: {simDebrisResult.method || '-'}</div>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.8rem' }}>
+                              {Array.isArray(simDebrisResult.impact_zones) && simDebrisResult.impact_zones.map((zone, i) => (
+                                <div key={i} style={{ padding: '1rem', borderRadius: '4px', background: zone.risk_level === 'YUKSEK' ? 'rgba(206,18,18,0.08)' : zone.risk_level === 'KRITIK' ? 'rgba(206,18,18,0.15)' : 'rgba(34,197,94,0.08)', border: `1px solid ${zone.risk_level === 'YUKSEK' ? '#CE1212' : zone.risk_level === 'KRITIK' ? '#CE1212' : '#22c55e'}22` }}>
+                                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+                                    <div style={{ fontWeight: 900, fontSize: '0.9rem' }}>{zone.stage_num}. Asama: {zone.name}</div>
+                                    <div style={{ fontSize: '0.65rem', fontWeight: 900, padding: '3px 8px', borderRadius: '3px', background: zone.risk_level === 'YUKSEK' ? '#CE1212' : zone.risk_level === 'KRITIK' ? '#000' : '#22c55e', color: 'white' }}>{zone.risk_level}</div>
+                                  </div>
+                                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '0.5rem', fontSize: '0.7rem' }}>
+                                    <div><span style={{ color: '#64748b' }}>Menzil:</span> <strong>{zone.downrange_km || 0} km</strong></div>
+                                    <div><span style={{ color: '#64748b' }}>Kutle:</span> <strong>{zone.mass_kg?.toLocaleString() || 0} kg</strong></div>
+                                    <div><span style={{ color: '#64748b' }}>Bertaraf:</span> <strong>{zone.disposal || '-'}</strong></div>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                            <div style={{ marginTop: '1.5rem' }}>
+                              <div className="card-subtitle" style={{ letterSpacing: '2px', color: 'var(--primary-blue)', fontWeight: 'bold', marginBottom: '0.8rem', fontSize: '0.7rem' }}>AYRILMA MANIFESTI</div>
+                              <div style={{ overflowX: 'auto' }}>
+                                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.7rem' }}>
+                                  <thead>
+                                    <tr style={{ borderBottom: '2px solid #cecbbf', textAlign: 'left' }}>
+                                      <th style={{ padding: '6px', fontWeight: 900 }}>#</th>
+                                      <th style={{ padding: '6px', fontWeight: 900 }}>Asama</th>
+                                      <th style={{ padding: '6px', fontWeight: 900 }}>Itki (kN)</th>
+                                      <th style={{ padding: '6px', fontWeight: 900 }}>Yakit (kg)</th>
+                                      <th style={{ padding: '6px', fontWeight: 900 }}>Bos (kg)</th>
+                                      <th style={{ padding: '6px', fontWeight: 900 }}>Yanma (s)</th>
+                                      <th style={{ padding: '6px', fontWeight: 900 }}>Cap (m)</th>
+                                      <th style={{ padding: '6px', fontWeight: 900 }}>Bertaraf</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {Array.isArray(simDebrisResult.stages_manifest) && simDebrisResult.stages_manifest.map((s, i) => (
+                                      <tr key={i} style={{ borderBottom: '1px solid #e8e6de' }}>
+                                        <td style={{ padding: '6px', fontWeight: 700 }}>{s.stage_num}</td>
+                                        <td style={{ padding: '6px' }}>{s.name}</td>
+                                        <td style={{ padding: '6px' }}>{s.thrust_kn?.toLocaleString() || '-'}</td>
+                                        <td style={{ padding: '6px' }}>{s.propellant_mass_kg?.toLocaleString() || '-'}</td>
+                                        <td style={{ padding: '6px' }}>{s.empty_mass_kg?.toLocaleString() || '-'}</td>
+                                        <td style={{ padding: '6px' }}>{s.burn_time_s || '-'}</td>
+                                        <td style={{ padding: '6px' }}>{s.diameter_m || '-'}</td>
+                                        <td style={{ padding: '6px', fontWeight: 700 }}>{s.disposal || '-'}</td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                    <div style={{ display: 'none' }}>
+                    <div style={{ background: '#1B1717', color: 'white', padding: '1rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px', fontSize: '1.2rem', fontWeight: 900, letterSpacing: '1px' }}>
                         <MapIcon style={{ color: '#38bdf8' }} /> CANLI ENKAZ TESPİTİ - HERMES (ADIM 5/6)
                       </div>
                       <button onClick={() => setSimStep(7)} style={{ background: '#CE1212', color: 'white', border: 'none', padding: '10px 20px', borderRadius: '4px', cursor: 'pointer', fontWeight: 900, display: 'flex', alignItems: 'center', gap: '8px', boxShadow: '0 4px 10px rgba(206,18,18,0.3)' }}>
                         <DescriptionIcon /> NİHAİ RAPOR VE SONUÇLAR
                       </button>
                     </div>
-                    <div style={{ flex: 1, position: 'relative', background: '#0f172a' }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.5rem', flex: 1, minHeight: 0, paddingTop: '1.5rem' }}>
+                      <div className="card" style={{ padding: 0, overflow: 'hidden', borderRadius: '4px', position: 'relative', display: 'flex', flexDirection: 'column' }}>
+                        <div style={{ padding: '1rem 1.5rem', background: '#1B1717', color: 'white', fontSize: '0.75rem', fontWeight: 900, letterSpacing: '2px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <span>ENKAZ DÃœÅÃœÅ HARÄ°TASI</span>
+                          <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
+                            <span style={{ color: '#f59e0b', fontSize: '0.6rem', fontWeight: 700 }}>Görev verisinden otomatik üretildi</span>
+                            {simDebrisResult && <span style={{ color: '#4ade80', fontSize: '0.65rem' }}>MOTOR: {simDebrisResult.method}</span>}
+                          </div>
+                        </div>
+                        <div style={{ flex: 1 }}>
+                          <MapContainer center={[simBase.lat, simBase.lon]} zoom={3} minZoom={2} maxBounds={[[-85, -180], [85, 180]]} maxBoundsViscosity={1.0} style={{ height: '100%', width: '100%' }}>
+                            <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" noWrap={true} />
+                            <Marker position={[simBase.lat, simBase.lon]}>
+                              <Popup><strong>FIRLATMA NOKTASI</strong><br />{simBase.name}<br />{simBase.lat.toFixed(4)}N / {simBase.lon.toFixed(4)}E</Popup>
+                            </Marker>
+                            {simDebrisResult && Array.isArray(simDebrisResult.impact_zones) && simDebrisResult.impact_zones.filter(z => z && !isNaN(z.lat) && !isNaN(z.lon)).map((zone, i) => (
+                              <CircleMarker key={i} center={[Number(zone.lat), Number(zone.lon)]} radius={zone.risk_level === 'YUKSEK' ? 14 : zone.risk_level === 'KRITIK' ? 18 : 10} pathOptions={{ color: zone.risk_level === 'YUKSEK' ? '#CE1212' : zone.risk_level === 'KRITIK' ? '#CE1212' : '#f59e0b', fillColor: zone.risk_level === 'YUKSEK' ? '#CE1212' : zone.risk_level === 'KRITIK' ? '#CE1212' : '#22c55e', fillOpacity: 0.5, weight: 2 }}>
+                                <Popup>
+                                  <strong>{zone.stage_num}. AÅŸama: {zone.name}</strong><br />
+                                  Menzil: {zone.downrange_km} km<br />
+                                  KÃ¼tle: {zone.mass_kg?.toLocaleString() || '0'} kg<br />
+                                  Bertaraf: {zone.disposal || 'Bilinmiyor'}<br />
+                                  Risk: {zone.risk_level || 'Normal'}
+                                </Popup>
+                              </CircleMarker>
+                            ))}
+                          </MapContainer>
+                        </div>
+                      </div>
+
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', overflowY: 'auto', minHeight: 0 }} className="custom-scroll">
+                        <div className="card" style={{ borderRadius: '4px', padding: '1.5rem' }}>
+                          <div className="card-subtitle" style={{ letterSpacing: '2px', color: 'var(--primary-blue)', fontWeight: 'bold', marginBottom: '1rem' }}>GÃ–REV PARAMETRELERÄ°</div>
+                          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                            <div>
+                              <label style={{ fontSize: '0.65rem', fontWeight: 800, color: '#64748b', display: 'block', marginBottom: '4px' }}>ROKET MODELÄ°</label>
+                              <div style={{ width: '100%', padding: '10px 14px', height: '42px', borderRadius: '4px', background: 'white', color: '#1B1717', fontWeight: 700, boxSizing: 'border-box' }}>{simRocket?.name || '-'}</div>
+                            </div>
+                            <div>
+                              <label style={{ fontSize: '0.65rem', fontWeight: 800, color: '#64748b', display: 'block', marginBottom: '4px' }}>FIRLATMA ÃœSSÃœ</label>
+                              <div style={{ width: '100%', padding: '10px 14px', height: '42px', borderRadius: '4px', background: 'white', color: '#1B1717', fontWeight: 700, boxSizing: 'border-box' }}>{simBase?.name || '-'}</div>
+                            </div>
+                            <div>
+                              <label style={{ fontSize: '0.65rem', fontWeight: 800, color: '#64748b', display: 'block', marginBottom: '4px' }}>FIRLATMA ENLEMI</label>
+                              <div style={{ width: '100%', padding: '10px 14px', height: '42px', borderRadius: '4px', background: 'white', color: '#1B1717', fontWeight: 700, boxSizing: 'border-box' }}>{simBase?.lat?.toFixed(4) || '-'}</div>
+                            </div>
+                            <div>
+                              <label style={{ fontSize: '0.65rem', fontWeight: 800, color: '#64748b', display: 'block', marginBottom: '4px' }}>FIRLATMA BOYLAMI</label>
+                              <div style={{ width: '100%', padding: '10px 14px', height: '42px', borderRadius: '4px', background: 'white', color: '#1B1717', fontWeight: 700, boxSizing: 'border-box' }}>{simBase?.lon?.toFixed(4) || '-'}</div>
+                            </div>
+                            <div>
+                              <label style={{ fontSize: '0.65rem', fontWeight: 800, color: '#64748b', display: 'block', marginBottom: '4px' }}>AZÄ°MÃœT (derece)</label>
+                              <div style={{ width: '100%', padding: '10px 14px', height: '42px', borderRadius: '4px', background: 'white', color: '#1B1717', fontWeight: 700, boxSizing: 'border-box' }}>90</div>
+                            </div>
+                            <div>
+                              <label style={{ fontSize: '0.65rem', fontWeight: 800, color: '#64748b', display: 'block', marginBottom: '4px' }}>HERMES DURUMU</label>
+                              <div style={{ width: '100%', padding: '10px 14px', height: '42px', borderRadius: '4px', background: simDebrisResult ? '#1B1717' : '#cecbbf', color: simDebrisResult ? 'white' : '#1B1717', fontWeight: 900, boxSizing: 'border-box' }}>{simDebrisResult ? 'ANALÄ°Z HAZIR' : 'VERÄ° BEKLENÄ°YOR'}</div>
+                            </div>
+                          </div>
+                        </div>
+
+                        {simDebrisResult && (
+                          <div className="card" style={{ borderRadius: '4px', padding: '1.5rem' }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+                              <div className="card-subtitle" style={{ letterSpacing: '2px', color: 'var(--primary-blue)', fontWeight: 'bold', margin: 0 }}>AÅAMA BAZLI ENKAZ TAHMÄ°NÄ°</div>
+                              <button onClick={generateDebrisPDF} style={{ padding: '6px 12px', background: '#CE1212', color: 'white', border: 'none', borderRadius: '4px', fontWeight: 900, cursor: 'pointer', fontSize: '0.6rem', letterSpacing: '1px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                <ArticleIcon style={{ fontSize: '0.8rem' }} /> RAPOR AL (PDF)
+                              </button>
+                            </div>
+                            <div style={{ fontSize: '0.7rem', color: '#64748b', marginBottom: '1rem' }}>Roket: <strong>{simDebrisResult.rocket || simRocket?.name || '-'}</strong> | YakÄ±t: {simDebrisResult.propellant || '-'} | GÃ¼ven: {simDebrisResult.confidence || '-'} | Motor: {simDebrisResult.method || '-'}</div>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.8rem' }}>
+                              {Array.isArray(simDebrisResult.impact_zones) && simDebrisResult.impact_zones.map((zone, i) => (
+                                <div key={i} style={{ padding: '1rem', borderRadius: '4px', background: zone.risk_level === 'YUKSEK' ? 'rgba(206,18,18,0.08)' : zone.risk_level === 'KRITIK' ? 'rgba(206,18,18,0.15)' : 'rgba(34,197,94,0.08)', border: `1px solid ${zone.risk_level === 'YUKSEK' ? '#CE1212' : zone.risk_level === 'KRITIK' ? '#CE1212' : '#22c55e'}22` }}>
+                                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+                                    <div style={{ fontWeight: 900, fontSize: '0.9rem' }}>{zone.stage_num}. AÅŸama: {zone.name}</div>
+                                    <div style={{ fontSize: '0.65rem', fontWeight: 900, padding: '3px 8px', borderRadius: '3px', background: zone.risk_level === 'YUKSEK' ? '#CE1212' : zone.risk_level === 'KRITIK' ? '#000' : '#22c55e', color: 'white' }}>{zone.risk_level}</div>
+                                  </div>
+                                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '0.5rem', fontSize: '0.7rem' }}>
+                                    <div><span style={{ color: '#64748b' }}>Menzil:</span> <strong>{zone.downrange_km || 0} km</strong></div>
+                                    <div><span style={{ color: '#64748b' }}>KÃ¼tle:</span> <strong>{zone.mass_kg?.toLocaleString() || 0} kg</strong></div>
+                                    <div><span style={{ color: '#64748b' }}>Bertaraf:</span> <strong>{zone.disposal || '-'}</strong></div>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                            <div style={{ marginTop: '1.5rem' }}>
+                              <div className="card-subtitle" style={{ letterSpacing: '2px', color: 'var(--primary-blue)', fontWeight: 'bold', marginBottom: '0.8rem', fontSize: '0.7rem' }}>AYRILMA MANÄ°FESTÄ°</div>
+                              <div style={{ overflowX: 'auto' }}>
+                                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.7rem' }}>
+                                  <thead>
+                                    <tr style={{ borderBottom: '2px solid #cecbbf', textAlign: 'left' }}>
+                                      <th style={{ padding: '6px', fontWeight: 900 }}>#</th>
+                                      <th style={{ padding: '6px', fontWeight: 900 }}>AÅŸama</th>
+                                      <th style={{ padding: '6px', fontWeight: 900 }}>Ä°tki (kN)</th>
+                                      <th style={{ padding: '6px', fontWeight: 900 }}>YakÄ±t (kg)</th>
+                                      <th style={{ padding: '6px', fontWeight: 900 }}>BoÅŸ (kg)</th>
+                                      <th style={{ padding: '6px', fontWeight: 900 }}>Yanma (s)</th>
+                                      <th style={{ padding: '6px', fontWeight: 900 }}>Ã‡ap (m)</th>
+                                      <th style={{ padding: '6px', fontWeight: 900 }}>Bertaraf</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {Array.isArray(simDebrisResult.stages_manifest) && simDebrisResult.stages_manifest.map((s, i) => (
+                                      <tr key={i} style={{ borderBottom: '1px solid #e8e6de' }}>
+                                        <td style={{ padding: '6px', fontWeight: 700 }}>{s.stage_num}</td>
+                                        <td style={{ padding: '6px' }}>{s.name}</td>
+                                        <td style={{ padding: '6px' }}>{s.thrust_kn?.toLocaleString() || '-'}</td>
+                                        <td style={{ padding: '6px' }}>{s.propellant_mass_kg?.toLocaleString() || '-'}</td>
+                                        <td style={{ padding: '6px' }}>{s.empty_mass_kg?.toLocaleString() || '-'}</td>
+                                        <td style={{ padding: '6px' }}>{s.burn_time_s || '-'}</td>
+                                        <td style={{ padding: '6px' }}>{s.diameter_m || '-'}</td>
+                                        <td style={{ padding: '6px', fontWeight: 700 }}>{s.disposal || '-'}</td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                      </div>
+                      {/*
+                      <div style={{ display: 'none', flex: 1, position: 'relative', background: '#0f172a' }}>
                       <MapContainer center={[simBase.lat, simBase.lon]} zoom={7} style={{ height: '100%', width: '100%', background: '#0f172a' }}>
                         <TileLayer url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png" />
                         <Marker position={[simBase.lat, simBase.lon]}><Popup>FIRLATMA ÜSSÜ: {simBase.name}</Popup></Marker>
-                        
+
                         {simDebrisResult && simDebrisResult.impact_zones && simDebrisResult.impact_zones.map((zone, i) => (
                           <React.Fragment key={i}>
                             <Marker position={[zone.lat, zone.lon]}>
@@ -2449,27 +3697,28 @@ function App() {
                               </Popup>
                             </Marker>
                             <Circle center={[zone.lat, zone.lon]} radius={(zone.msi * 10 * 1000) || 5000} pathOptions={{ color: zone.type === 'UNCONTROLLED' ? '#CE1212' : '#f59e0b', fillColor: zone.type === 'UNCONTROLLED' ? '#CE1212' : '#f59e0b', fillOpacity: 0.15 }} />
-                            <Polyline positions={[[simBase.lat, simBase.lon], [zone.lat, zone.lon]]} pathOptions={{ color: '#38bdf8', weight: 1.5, dashArray: '5,5', opacity: 0.5 }} />
+                            <Polyline positions={buildBallisticArcPoints(simBase.lat, simBase.lon, zone.lat, zone.lon, simFlightResult?.metrics?.maxAlt || 0)} pathOptions={{ color: '#38bdf8', weight: 2.5, dashArray: '8,8', opacity: 0.75 }} />
                           </React.Fragment>
                         ))}
                       </MapContainer>
                       <div style={{ position: 'absolute', bottom: '30px', right: '30px', zIndex: 1000, background: 'rgba(27,23,23,0.95)', color: 'white', padding: '1.5rem', borderRadius: '4px', minWidth: '320px', boxShadow: '0 8px 30px rgba(0,0,0,0.5)', border: '1px solid rgba(255,255,255,0.1)' }}>
-                         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#38bdf8', marginBottom: '1.2rem' }}>
-                            <PublicIcon fontSize="small" /> <span style={{ fontSize: '0.8rem', fontWeight: 900, letterSpacing: '1px' }}>HERMES CANLI ÖLÇÜM AĞI</span>
-                         </div>
-                         <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px', paddingBottom: '8px', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>
-                            <span style={{ fontSize: '0.75rem', opacity: 0.8 }}>Dağılım Kademe Sayısı:</span>
-                            <span style={{ fontSize: '0.8rem', fontWeight: 900 }}>{simDebrisResult?.impact_zones?.length || 0} Adet</span>
-                         </div>
-                         <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px', paddingBottom: '8px', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>
-                            <span style={{ fontSize: '0.75rem', opacity: 0.8 }}>Maksimum Yayılım Çapı:</span>
-                            <span style={{ fontSize: '0.8rem', fontWeight: 900, color: '#CE1212' }}>{simDebrisResult?.impact_zones ? Math.max(...simDebrisResult.impact_zones.map(z => z.msi * 10 || 1.0)).toFixed(1) : 0} km</span>
-                         </div>
-                         <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                            <span style={{ fontSize: '0.75rem', opacity: 0.8 }}>Uzay Aracı Referansı:</span>
-                            <span style={{ fontSize: '0.8rem', fontWeight: 900 }}>{simRocket?.name}</span>
-                         </div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#38bdf8', marginBottom: '1.2rem' }}>
+                          <PublicIcon fontSize="small" /> <span style={{ fontSize: '0.8rem', fontWeight: 900, letterSpacing: '1px' }}>HERMES CANLI ÖLÇÜM AĞI</span>
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px', paddingBottom: '8px', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>
+                          <span style={{ fontSize: '0.75rem', opacity: 0.8 }}>Dağılım Kademe Sayısı:</span>
+                          <span style={{ fontSize: '0.8rem', fontWeight: 900 }}>{simDebrisResult?.impact_zones?.length || 0} Adet</span>
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px', paddingBottom: '8px', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>
+                          <span style={{ fontSize: '0.75rem', opacity: 0.8 }}>Maksimum Yayılım Çapı:</span>
+                          <span style={{ fontSize: '0.8rem', fontWeight: 900, color: '#CE1212' }}>{simDebrisResult?.impact_zones ? Math.max(...simDebrisResult.impact_zones.map(z => z.msi * 10 || 1.0)).toFixed(1) : 0} km</span>
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                          <span style={{ fontSize: '0.75rem', opacity: 0.8 }}>Uzay Aracı Referansı:</span>
+                          <span style={{ fontSize: '0.8rem', fontWeight: 900 }}>{simRocket?.name}</span>
+                        </div>
                       </div>
+                      */}
                     </div>
                   </div>
                 )}
@@ -2478,7 +3727,7 @@ function App() {
                   <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
                     {simResult ? (
                       <div style={{ flex: 1, overflowY: 'auto', paddingRight: '1rem' }} className="custom-scroll">
-                        
+
                         {/* 1. MASTER KARAR HUD (COMBAT-READY) */}
                         <div style={{ display: 'flex', gap: '1.5rem', marginBottom: '1.5rem' }}>
                           <div style={{
@@ -2496,7 +3745,7 @@ function App() {
                             <div style={{ position: 'absolute', top: '-10%', right: '-5%', opacity: 0.1, transform: 'rotate(-15deg)' }}>
                               <RocketLaunchIcon style={{ fontSize: '12rem' }} />
                             </div>
-                            
+
                             <div style={{ position: 'relative', zIndex: 2 }}>
                               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
                                 <div style={{ fontSize: '0.7rem', fontWeight: 900, opacity: 0.8, letterSpacing: '3px' }}>NİHAİ MASTER KARAR</div>
@@ -2526,96 +3775,121 @@ function App() {
                           </div>
                         </div>
 
+                        <div className="card static-card" style={{ padding: '1.35rem', marginBottom: '1.5rem', background: '#ffffff', border: '1px solid rgba(27,23,23,0.1)' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '1rem', marginBottom: '1rem' }}>
+                            <div>
+                              <div style={{ fontSize: '0.72rem', fontWeight: 900, color: '#CE1212', letterSpacing: '2px' }}>ORTAK GOREV KARAR PANELI</div>
+                              <div style={{ fontSize: '1.4rem', fontWeight: 900, color: '#1B1717', marginTop: '0.35rem' }}>{simResult?.decision || 'ANALIZ BEKLENIYOR'}</div>
+                            </div>
+                            <div style={{ minWidth: '120px', background: '#EEEBDD', color: '#1B1717', borderRadius: '4px', padding: '0.75rem 1rem', textAlign: 'center', border: '1px solid rgba(27,23,23,0.12)' }}>
+                              <div style={{ fontSize: '0.65rem', letterSpacing: '1px', fontWeight: 900, opacity: 0.7 }}>DURUM</div>
+                              <div style={{ fontSize: '1.1rem', fontWeight: 900, marginTop: '0.2rem', color: '#CE1212' }}>{getDecisionTone(simResult?.decision, simResult?.status, simResult?.score).label}</div>
+                              <div style={{ fontSize: '0.72rem', marginTop: '0.3rem', opacity: 0.85 }}>Skor %{simResult?.score ?? 0}</div>
+                            </div>
+                          </div>
+
+                          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: '0.85rem' }}>
+                            {getMissionDecisionRows().map((row) => (
+                              <div key={row.title} style={{ background: '#F8F6EF', borderRadius: '4px', padding: '0.95rem 1rem', border: '1px solid rgba(27,23,23,0.08)' }}>
+                                <div style={{ fontSize: '0.66rem', fontWeight: 900, color: '#1B1717', letterSpacing: '1px' }}>{row.title}</div>
+                                <div style={{ fontSize: '0.9rem', fontWeight: 900, color: '#1B1717', marginTop: '0.35rem', lineHeight: 1.35 }}>{row.value}</div>
+                                <div style={{ fontSize: '0.7rem', color: '#64748b', marginTop: '0.35rem', lineHeight: 1.45 }}>{row.note}</div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+
                         {/* 2. THREE PILLAR ANALYSIS - ÇEVRE | FİZİK | ENKAZ */}
                         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '1rem', marginBottom: '1.5rem' }}>
-                          
-                          {/* PANEL 1: ÇEVRE (ENVIRONMENT) */}
-                          <div style={{ background: '#ffffff', border: '1px solid rgba(27,23,23,0.1)', borderRadius: '4px', overflow: 'hidden' }}>
+
+
+                        {/* PANEL 1: ?EVRE (ENVIRONMENT) */}
+                        <div style={{ background: '#ffffff', border: '1px solid rgba(27,23,23,0.1)', borderRadius: '4px', overflow: 'hidden' }}>
                             <div style={{ background: 'rgba(27,23,23,0.04)', padding: '0.8rem 1.2rem', borderBottom: '1px solid rgba(27,23,23,0.1)', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                               <PublicIcon fontSize="small" style={{ color: '#3b82f6' }} />
-                               <div style={{ fontSize: '0.75rem', fontWeight: 900, color: '#1B1717', letterSpacing: '1px' }}>1. ÇEVRE VE LOKASYON</div>
+                              <PublicIcon fontSize="small" style={{ color: '#3b82f6' }} />
+                              <div style={{ fontSize: '0.75rem', fontWeight: 900, color: '#1B1717', letterSpacing: '1px' }}>1. ÇEVRE VE LOKASYON</div>
                             </div>
                             <div style={{ padding: '1.2rem', display: 'flex', flexDirection: 'column', gap: '0.8rem' }}>
-                               <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                                 <span style={{ fontSize: '0.65rem', fontWeight: 900, color: '#64748b' }}>HAVA SICAKLIĞI</span>
-                                 <span style={{ fontSize: '0.8rem', fontWeight: 900 }}>{simResult?.weather_forecast?.temp}°C</span>
-                               </div>
-                               <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                                 <span style={{ fontSize: '0.65rem', fontWeight: 900, color: '#64748b' }}>RÜZGAR GÜCÜ</span>
-                                 <span style={{ fontSize: '0.8rem', fontWeight: 900 }}>{simResult?.weather_forecast?.wind_speed} m/s</span>
-                               </div>
-                               <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                                 <span style={{ fontSize: '0.65rem', fontWeight: 900, color: '#64748b' }}>HAVA SAHASI (RİSK)</span>
-                                 <span style={{ fontSize: '0.8rem', fontWeight: 900 }}>{simResult?.topo_stats?.airspace_risk || 'Normal'}</span>
-                               </div>
-                               <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                                 <span style={{ fontSize: '0.65rem', fontWeight: 900, color: '#64748b' }}>YERLEŞİM MESAFESİ</span>
-                                 <span style={{ fontSize: '0.8rem', fontWeight: 900 }}>{simResult?.topo_stats?.residential || 'Bulunmadı'}</span>
-                               </div>
+                              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                                <span style={{ fontSize: '0.65rem', fontWeight: 900, color: '#64748b' }}>HAVA SICAKLIĞI</span>
+                                <span style={{ fontSize: '0.8rem', fontWeight: 900 }}>{simResult?.weather_forecast?.temp}°C</span>
+                              </div>
+                              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                                <span style={{ fontSize: '0.65rem', fontWeight: 900, color: '#64748b' }}>RÜZGAR GÜCÜ</span>
+                                <span style={{ fontSize: '0.8rem', fontWeight: 900 }}>{simResult?.weather_forecast?.wind_speed} m/s</span>
+                              </div>
+                              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                                <span style={{ fontSize: '0.65rem', fontWeight: 900, color: '#64748b' }}>HAVA SAHASI (RİSK)</span>
+                                <span style={{ fontSize: '0.8rem', fontWeight: 900 }}>{simResult?.topo_stats?.airspace_risk || 'Normal'}</span>
+                              </div>
+                              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                                <span style={{ fontSize: '0.65rem', fontWeight: 900, color: '#64748b' }}>YERLEŞİM MESAFESİ</span>
+                                <span style={{ fontSize: '0.8rem', fontWeight: 900 }}>{simResult?.topo_stats?.residential || 'Bulunmadı'}</span>
+                              </div>
                             </div>
                           </div>
 
                           {/* PANEL 2: FİZİK (PHYSICS) */}
                           <div style={{ background: '#ffffff', border: '1px solid rgba(27,23,23,0.1)', borderRadius: '4px', overflow: 'hidden' }}>
                             <div style={{ background: '#CE1212', padding: '0.8rem 1.2rem', borderBottom: '1px solid rgba(27,23,23,0.1)', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                               <RocketLaunchIcon fontSize="small" style={{ color: '#ffffff' }} />
-                               <div style={{ fontSize: '0.75rem', fontWeight: 900, color: '#ffffff', letterSpacing: '1px' }}>2. BALİSTİK UÇUŞ FİZİĞİ</div>
+                              <RocketLaunchIcon fontSize="small" style={{ color: '#ffffff' }} />
+                              <div style={{ fontSize: '0.75rem', fontWeight: 900, color: '#ffffff', letterSpacing: '1px' }}>2. BALİSTİK UÇUŞ FİZİĞİ</div>
                             </div>
                             <div style={{ padding: '1.2rem', display: 'flex', flexDirection: 'column', gap: '0.8rem' }}>
-                               {simFlightResult && simFlightResult.metrics ? (
-                                  <>
-                                   <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                                     <span style={{ fontSize: '0.65rem', fontWeight: 900, color: '#64748b' }}>MAKSİMUM İRTİFA</span>
-                                     <span style={{ fontSize: '0.8rem', fontWeight: 900, color: '#CE1212' }}>{Math.round(simFlightResult.metrics.maxAlt).toLocaleString()} m</span>
-                                   </div>
-                                   <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                                     <span style={{ fontSize: '0.65rem', fontWeight: 900, color: '#64748b' }}>MAKSİMUM HIZ</span>
-                                     <span style={{ fontSize: '0.8rem', fontWeight: 900 }}>{Math.round(simFlightResult.metrics.maxVel).toLocaleString()} m/s</span>
-                                   </div>
-                                   <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                                     <span style={{ fontSize: '0.65rem', fontWeight: 900, color: '#64748b' }}>UÇUŞ SÜRESİ</span>
-                                     <span style={{ fontSize: '0.8rem', fontWeight: 900 }}>{Math.round(simFlightResult.metrics.t)} s</span>
-                                   </div>
-                                   <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                                     <span style={{ fontSize: '0.65rem', fontWeight: 900, color: '#64748b' }}>MAKS DİN. BASINÇ (Q)</span>
-                                     <span style={{ fontSize: '0.8rem', fontWeight: 900 }}>{((simFlightResult.metrics.maxQ || 0)/1000).toFixed(1)} kPa</span>
-                                   </div>
-                                  </>
-                               ) : (
-                                  <div style={{ fontSize: '0.7rem', color: '#64748b', fontStyle: 'italic', textAlign: 'center', marginTop: '1rem' }}>Fizik simülatörüne ulaşılamadı.</div>
-                               )}
+                              {simFlightResult && simFlightResult.metrics ? (
+                                <>
+                                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                                    <span style={{ fontSize: '0.65rem', fontWeight: 900, color: '#64748b' }}>MAKSİMUM İRTİFA</span>
+                                    <span style={{ fontSize: '0.8rem', fontWeight: 900, color: '#CE1212' }}>{Math.round(simFlightResult.metrics.maxAlt).toLocaleString()} m</span>
+                                  </div>
+                                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                                    <span style={{ fontSize: '0.65rem', fontWeight: 900, color: '#64748b' }}>MAKSİMUM HIZ</span>
+                                    <span style={{ fontSize: '0.8rem', fontWeight: 900 }}>{Math.round(simFlightResult.metrics.maxVel).toLocaleString()} m/s</span>
+                                  </div>
+                                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                                    <span style={{ fontSize: '0.65rem', fontWeight: 900, color: '#64748b' }}>UÇUŞ SÜRESİ</span>
+                                    <span style={{ fontSize: '0.8rem', fontWeight: 900 }}>{Math.round(simFlightResult.metrics.t)} s</span>
+                                  </div>
+                                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                                    <span style={{ fontSize: '0.65rem', fontWeight: 900, color: '#64748b' }}>MAKS DİN. BASINÇ (Q)</span>
+                                    <span style={{ fontSize: '0.8rem', fontWeight: 900 }}>{((simFlightResult.metrics.maxQ || 0) / 1000).toFixed(1)} kPa</span>
+                                  </div>
+                                </>
+                              ) : (
+                                <div style={{ fontSize: '0.7rem', color: '#64748b', fontStyle: 'italic', textAlign: 'center', marginTop: '1rem' }}>Fizik simülatörüne ulaşılamadı.</div>
+                              )}
                             </div>
                           </div>
 
                           {/* PANEL 3: ENKAZ (DEBRIS) */}
                           <div style={{ background: '#ffffff', border: '1px solid rgba(27,23,23,0.1)', borderRadius: '4px', overflow: 'hidden' }}>
                             <div style={{ background: 'rgba(27,23,23,0.04)', padding: '0.8rem 1.2rem', borderBottom: '1px solid rgba(27,23,23,0.1)', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                               <MapIcon fontSize="small" style={{ color: '#10b981' }} />
-                               <div style={{ fontSize: '0.75rem', fontWeight: 900, color: '#1B1717', letterSpacing: '1px' }}>3. HERMES ENKAZ ANALİZİ</div>
+                              <MapIcon fontSize="small" style={{ color: '#10b981' }} />
+                              <div style={{ fontSize: '0.75rem', fontWeight: 900, color: '#1B1717', letterSpacing: '1px' }}>3. HERMES ENKAZ ANALİZİ</div>
                             </div>
                             <div style={{ padding: '1.2rem', display: 'flex', flexDirection: 'column', gap: '0.8rem' }}>
-                               {simDebrisResult && simDebrisResult.impact_zones && simDebrisResult.impact_zones.length > 0 ? (
-                                  <>
-                                   <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                                     <span style={{ fontSize: '0.65rem', fontWeight: 900, color: '#64748b' }}>HESAPLANAN KADEME</span>
-                                     <span style={{ fontSize: '0.8rem', fontWeight: 900 }}>{simDebrisResult.impact_zones.length} Parça</span>
-                                   </div>
-                                   <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                                     <span style={{ fontSize: '0.65rem', fontWeight: 900, color: '#64748b' }}>MAKS YAYILIM ÇAPI</span>
-                                     <span style={{ fontSize: '0.8rem', fontWeight: 900 }}>{Math.max(...simDebrisResult.impact_zones.map(z => z.msi * 10 || 1.0)).toFixed(1)} km</span>
-                                   </div>
-                                   <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                                     <span style={{ fontSize: '0.65rem', fontWeight: 900, color: '#64748b' }}>ORT. UZAKLIK</span>
-                                     <span style={{ fontSize: '0.8rem', fontWeight: 900, color: '#10b981' }}>{(simDebrisResult.impact_zones.reduce((a,b)=>a+(b.downrange_km || 0), 0) / simDebrisResult.impact_zones.length).toFixed(1)} km</span>
-                                   </div>
-                                   <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                                     <span style={{ fontSize: '0.65rem', fontWeight: 900, color: '#64748b' }}>HERMES DURUMU</span>
-                                     <span style={{ fontSize: '0.7rem', fontWeight: 900, color: '#10b981', background: 'rgba(16,185,129,0.1)', padding: '2px 6px', borderRadius: '4px' }}>BAŞARILI TESPİT</span>
-                                   </div>
-                                  </>
-                               ) : (
-                                  <div style={{ fontSize: '0.7rem', color: '#64748b', fontStyle: 'italic', textAlign: 'center', marginTop: '1rem' }}>Enkaz tehlikesi veya analizi yok.</div>
-                               )}
+                              {simDebrisResult && simDebrisResult.impact_zones && simDebrisResult.impact_zones.length > 0 ? (
+                                <>
+                                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                                    <span style={{ fontSize: '0.65rem', fontWeight: 900, color: '#64748b' }}>HESAPLANAN KADEME</span>
+                                    <span style={{ fontSize: '0.8rem', fontWeight: 900 }}>{simDebrisResult.impact_zones.length} Parça</span>
+                                  </div>
+                                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                                    <span style={{ fontSize: '0.65rem', fontWeight: 900, color: '#64748b' }}>MAKS YAYILIM ÇAPI</span>
+                                    <span style={{ fontSize: '0.8rem', fontWeight: 900 }}>{Math.max(...simDebrisResult.impact_zones.map(z => z.msi * 10 || 1.0)).toFixed(1)} km</span>
+                                  </div>
+                                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                                    <span style={{ fontSize: '0.65rem', fontWeight: 900, color: '#64748b' }}>ORT. UZAKLIK</span>
+                                    <span style={{ fontSize: '0.8rem', fontWeight: 900, color: '#10b981' }}>{(simDebrisResult.impact_zones.reduce((a, b) => a + (b.downrange_km || 0), 0) / simDebrisResult.impact_zones.length).toFixed(1)} km</span>
+                                  </div>
+                                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                                    <span style={{ fontSize: '0.65rem', fontWeight: 900, color: '#64748b' }}>HERMES DURUMU</span>
+                                    <span style={{ fontSize: '0.7rem', fontWeight: 900, color: '#10b981', background: 'rgba(16,185,129,0.1)', padding: '2px 6px', borderRadius: '4px' }}>BAŞARILI TESPİT</span>
+                                  </div>
+                                </>
+                              ) : (
+                                <div style={{ fontSize: '0.7rem', color: '#64748b', fontStyle: 'italic', textAlign: 'center', marginTop: '1rem' }}>Enkaz tehlikesi veya analizi yok.</div>
+                              )}
                             </div>
                           </div>
 
@@ -2653,18 +3927,13 @@ function App() {
                           <button onClick={() => { setSimStep(1); setSimResult(null); setSimFlightResult(null); setSimDebrisResult(null); localStorage.removeItem('tt_mission_lock'); }} style={{ padding: '1rem 2rem', background: '#cecbbf', borderRadius: '4px', fontSize: '0.75rem', fontWeight: 900, cursor: 'pointer', border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', color: '#1B1717' }}>
                             <RefreshIcon fontSize="small" /> YENİ GÖREV PLANLA
                           </button>
-  
-                          <button onClick={() => {
-                            if (window.confirm("Bomba seviyesi tüm harita PDF raporu olarak yazdırılsın mı?")) window.print();
-                          }} style={{ flex: 1, padding: '1rem', background: 'transparent', color: '#1B1717', borderRadius: '4px', fontSize: '0.75rem', fontWeight: 900, cursor: 'pointer', border: '1px solid #1B1717', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
-                            <DescriptionIcon fontSize="small" /> NİHAİ MASTER PDF İNDİR VE YAZDIR
+
+                          <button onClick={generateMissionReportPDF} style={{ flex: 1, padding: '1rem', background: 'transparent', color: '#1B1717', borderRadius: '4px', fontSize: '0.75rem', fontWeight: 900, cursor: 'pointer', border: '1px solid #1B1717', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
+                            <DescriptionIcon fontSize="small" /> PROFESYONEL PDF RAPORU İNDİR
                           </button>
 
-                          <button onClick={() => {
-                            // Can either generate PDF from top or query optimal condition.
-                            addToast("BİLGİ", "Nihai fırlatma durumu kaydedildi.", "success");
-                          }} style={{ flex: 1, padding: '1rem', background: '#1B1717', color: 'white', borderRadius: '4px', fontSize: '0.75rem', fontWeight: 900, cursor: 'pointer', border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
-                            <AnalyticsIcon fontSize="small" /> EN UYGUN KOŞULU SORGULA
+                          <button onClick={handleGenerateOptimalMissionReport} disabled={calculatingOptimal} style={{ flex: 1, padding: '1rem', background: '#1B1717', color: 'white', borderRadius: '4px', fontSize: '0.75rem', fontWeight: 900, cursor: 'pointer', border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', opacity: calculatingOptimal ? 0.7 : 1 }}>
+                            <AnalyticsIcon fontSize="small" /> {calculatingOptimal ? 'HESAPLANIYOR...' : 'EN UYGUN KOŞUL RAPORU AL'}
                           </button>
                         </div>
                       </div>

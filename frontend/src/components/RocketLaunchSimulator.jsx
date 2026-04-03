@@ -27,7 +27,6 @@ const DT = 1 / 240; // Çok çok hassas (Micro-step) fizik entegrasyonu (Düşme
 
 const clamp = (v, min, max) => Math.max(min, Math.min(max, v));
 const fmt = (n, d = 2) => Number(n).toFixed(d);
-
 const somiglianaGravity = (lat) => {
   const latRad = lat * (Math.PI / 180);
   return 9.7803253359 * (1 + 0.0019318526 * Math.pow(Math.sin(latRad), 2)) / Math.sqrt(1 - 0.00669438 * Math.pow(Math.sin(latRad), 2));

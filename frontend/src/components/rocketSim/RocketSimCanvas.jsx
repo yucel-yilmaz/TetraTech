@@ -1,4 +1,4 @@
-import React, { useRef, useEffect } from 'react';
+﻿import React, { useRef, useEffect } from 'react';
 import { useRocketSimStore } from './rocketSimStore';
 import { clamp, getAtmosphereLayer, Particle } from './rocketSimPhysics';
 
@@ -256,10 +256,23 @@ export default function RocketSimCanvas() {
         // ─── GÖKYÜZÜ ───
         const altFactor = clamp(sim.alt / 35000, 0, 1);
         const skyGrad = ctx.createLinearGradient(0, 0, 0, H);
-        skyGrad.addColorStop(0, `rgb(${30 - 30 * altFactor}, ${90 - 90 * altFactor}, ${190 - 190 * altFactor})`);
-        skyGrad.addColorStop(1, `rgb(${155 - 155 * altFactor}, ${210 - 200 * altFactor}, ${240 - 210 * altFactor})`);
+        skyGrad.addColorStop(0, `rgb(${18 - 14 * altFactor}, ${58 - 46 * altFactor}, ${128 - 114 * altFactor})`);
+        skyGrad.addColorStop(1, `rgb(${188 - 168 * altFactor}, ${222 - 200 * altFactor}, ${245 - 225 * altFactor})`);
         ctx.fillStyle = skyGrad;
         ctx.fillRect(0, 0, W, H);
+
+        const sunGlow = ctx.createRadialGradient(W * 0.78, H * 0.16, 0, W * 0.78, H * 0.16, H * 0.38);
+        sunGlow.addColorStop(0, `rgba(255, 244, 215, ${0.22 - altFactor * 0.1})`);
+        sunGlow.addColorStop(0.34, `rgba(255, 211, 145, ${0.14 - altFactor * 0.08})`);
+        sunGlow.addColorStop(1, 'rgba(255, 200, 120, 0)');
+        ctx.fillStyle = sunGlow;
+        ctx.fillRect(0, 0, W, H);
+
+        const horizonHaze = ctx.createLinearGradient(0, H * 0.5, 0, H);
+        horizonHaze.addColorStop(0, 'rgba(255,255,255,0)');
+        horizonHaze.addColorStop(1, `rgba(255, 232, 204, ${0.16 * (1 - altFactor)})`);
+        ctx.fillStyle = horizonHaze;
+        ctx.fillRect(0, H * 0.5, W, H * 0.5);
 
         // ─── YILDIZLAR ───
         if (altFactor > 0.04) {
@@ -279,7 +292,7 @@ export default function RocketSimCanvas() {
           ctx.globalAlpha = clamp(1 - sim.alt / 2500, 0, 1);
           const pX = W / 2 - (sim.x - sim.cameraX) * zoom;
 
-          ctx.fillStyle = '#7a6748';
+          ctx.fillStyle = '#8a7553';
           ctx.beginPath(); ctx.moveTo(0, gY);
           const hX = (pX * 0.1) % 400;
           for (let i = -400; i < W + 400; i += 200) {
@@ -287,16 +300,24 @@ export default function RocketSimCanvas() {
           }
           ctx.lineTo(W, H + 400); ctx.lineTo(0, H + 400); ctx.fill();
 
-          ctx.fillStyle = '#4ade80';
+          ctx.fillStyle = '#57d984';
           ctx.fillRect(0, gY, W, H + 400 - gY);
 
-          ctx.fillStyle = '#64748b'; ctx.fillRect(pX - 70 * zoom, gY - 8 * zoom, 140 * zoom, 8 * zoom);
-          ctx.fillStyle = '#475569'; ctx.fillRect(pX - 85 * zoom, gY, 170 * zoom, H + 400 - gY);
-          ctx.fillStyle = '#334155'; ctx.fillRect(pX - 35 * zoom, gY - 140 * zoom, 10 * zoom, 140 * zoom);
+          ctx.fillStyle = '#6b7280'; ctx.fillRect(pX - 70 * zoom, gY - 8 * zoom, 140 * zoom, 8 * zoom);
+          ctx.fillStyle = '#4b5563'; ctx.fillRect(pX - 85 * zoom, gY, 170 * zoom, H + 400 - gY);
+          ctx.fillStyle = '#1f2937'; ctx.fillRect(pX - 35 * zoom, gY - 140 * zoom, 10 * zoom, 140 * zoom);
 
+          ctx.fillStyle = '#1e293b';
           ctx.fillStyle = '#1e293b';
           ctx.beginPath(); ctx.moveTo(pX - 25 * zoom, gY - 120 * zoom); ctx.lineTo(pX - 12 * zoom, gY - 128 * zoom); ctx.lineTo(pX - 25 * zoom, gY - 110 * zoom); ctx.fill();
           ctx.beginPath(); ctx.moveTo(pX - 25 * zoom, gY - 60 * zoom); ctx.lineTo(pX - 12 * zoom, gY - 68 * zoom); ctx.lineTo(pX - 25 * zoom, gY - 50 * zoom); ctx.fill();
+          const smokeBloom = ctx.createRadialGradient(pX, gY + 12 * zoom, 0, pX, gY + 12 * zoom, 120 * zoom);
+          smokeBloom.addColorStop(0, `rgba(216, 221, 227, ${0.16 * (1 - altFactor)})`);
+          smokeBloom.addColorStop(1, 'rgba(216,221,227,0)');
+          ctx.fillStyle = smokeBloom;
+          ctx.beginPath();
+          ctx.ellipse(pX, gY + 18 * zoom, 150 * zoom, 44 * zoom, 0, 0, Math.PI * 2);
+          ctx.fill();
           ctx.globalAlpha = 1.0;
         }
 
@@ -576,6 +597,38 @@ export default function RocketSimCanvas() {
           
           const plumeExpand = clamp(1 + (sim.alt / 25000), 1, 4.0);
           const glowR = (pW * 2.5 + Math.random() * 6) * (plumeExpand * 0.7);
+
+          const plumeLength = clamp(120 * zoom * plumeExpand, 90 * zoom, 260 * zoom);
+          const plumeWidth = pW * (1.25 + plumeExpand * 0.24);
+          const corePlume = ctx.createLinearGradient(W / 2, baseEngineY - 8 * zoom, W / 2, baseEngineY + plumeLength);
+          if (sim.alt > 35000) {
+            corePlume.addColorStop(0, 'rgba(255,255,255,0.98)');
+            corePlume.addColorStop(0.24, 'rgba(150,220,255,0.82)');
+            corePlume.addColorStop(1, 'rgba(25,74,210,0)');
+          } else {
+            corePlume.addColorStop(0, 'rgba(255,255,255,0.98)');
+            corePlume.addColorStop(0.2, 'rgba(255,227,160,0.96)');
+            corePlume.addColorStop(0.55, 'rgba(255,132,30,0.72)');
+            corePlume.addColorStop(1, 'rgba(140,35,0,0)');
+          }
+          ctx.fillStyle = corePlume;
+          ctx.beginPath();
+          ctx.moveTo(W / 2 - pW * 0.2, baseEngineY + 1 * zoom);
+          ctx.quadraticCurveTo(W / 2 - plumeWidth, baseEngineY + plumeLength * 0.34, W / 2 - plumeWidth * 0.42, baseEngineY + plumeLength);
+          ctx.quadraticCurveTo(W / 2, baseEngineY + plumeLength * 1.08, W / 2 + plumeWidth * 0.42, baseEngineY + plumeLength);
+          ctx.quadraticCurveTo(W / 2 + plumeWidth, baseEngineY + plumeLength * 0.34, W / 2 + pW * 0.2, baseEngineY + 1 * zoom);
+          ctx.closePath();
+          ctx.fill();
+
+          const shockAlpha = clamp(0.3 * (1 - sim.alt / 22000), 0.08, 0.3);
+          ctx.strokeStyle = `rgba(255,255,255,${shockAlpha})`;
+          ctx.lineWidth = Math.max(1.1, 2.2 * zoom);
+          for (let i = 0; i < 3; i++) {
+            const ringY = baseEngineY + 18 * zoom + i * 22 * zoom * plumeExpand;
+            ctx.beginPath();
+            ctx.ellipse(W / 2, ringY, pW * (0.22 + i * 0.1), 6 * zoom + i * 3 * zoom, 0, 0, Math.PI * 2);
+            ctx.stroke();
+          }
           
           const glow = ctx.createRadialGradient(W / 2, baseEngineY, 0, W / 2, baseEngineY, glowR);
           glow.addColorStop(0, 'rgba(255, 255, 255, 0.9)');
@@ -596,6 +649,12 @@ export default function RocketSimCanvas() {
 
         ctx.restore();
 
+
+        const vignette = ctx.createRadialGradient(W / 2, H * 0.46, H * 0.12, W / 2, H * 0.46, H * 0.82);
+        vignette.addColorStop(0, 'rgba(0,0,0,0)');
+        vignette.addColorStop(1, 'rgba(7, 12, 20, 0.22)');
+        ctx.fillStyle = vignette;
+        ctx.fillRect(0, 0, W, H);
         // Rapor verisi hazır mı kontrol et
         if (state.running && state.trajectory && sim.t >= state.trajectory.length * 0.016666 && sim.phase !== 'CRASH') {
            if (!state.showReportButton) state.setShowReportButton(true);

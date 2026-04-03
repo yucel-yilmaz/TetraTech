@@ -6,7 +6,7 @@ import RocketSimReport from './RocketSimReport';
 import { RocketSimTimeControl } from './RocketSimTimeControl';
 import { useRocketSimStore } from './rocketSimStore';
 
-export default function RocketSimPage() {
+export default function RocketSimPage({ isMissionMode = false }) {
   React.useEffect(() => {
     return () => {
       useRocketSimStore.getState().resetSim();
@@ -41,7 +41,7 @@ export default function RocketSimPage() {
       </div>
 
       {/* Sağ: Parametre Paneli (TetraTech UI) */}
-      <RocketSimSidebar />
+      <RocketSimSidebar isMissionMode={isMissionMode} />
     </div>
   );
 }

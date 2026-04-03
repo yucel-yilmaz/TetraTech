@@ -83,6 +83,9 @@ export const useRocketSimStore = create((set) => ({
         body: JSON.stringify(state.params)
       });
       const data = await res.json();
+      if (!Array.isArray(data?.trajectory) || data.trajectory.length === 0) {
+        throw new Error('Bos veya gecersiz trajektori');
+      }
       
       const totalFuel = state.params.parts.reduce((acc, p) => acc + (p.fuelMass || 0), 0);
 

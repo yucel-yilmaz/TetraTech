@@ -54,3 +54,11 @@ diff.txt
 Thumbs.db
 .DS_Store
 desktop.ini
+
+# TetraTech Local Build Caches
+frontend/.vite/
+frontend/node_modules/
+frontend/release/
+*.tsbuildinfo
+.pytest_cache/
+.mypy_cache/

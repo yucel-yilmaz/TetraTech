@@ -1,93 +1,147 @@
-import requests
-import random
 import math
+import random
+
+import requests
+# .
+
+OPENSKY_TIMEOUT = 4
+
+
+def _format_flight(callsign, alt_text, distance_km, lat, lon, is_conflict, eta, status):
+    return {
+        "callsign": callsign,
+        "alt": alt_text,
+        "dist": f"{distance_km:.1f} km",
+        "lat": lat,
+        "lon": lon,
+        "is_conflict": is_conflict,
+        "eta_minutes": eta,
+        "status": status,
+    }
+
+
+def _build_response(lat, lon, flights, has_conflict, max_wait, source, source_detail=None):
+    count = sum(1 for flight in flights if flight.get("is_conflict"))
+    status_message = "SISTEM NOMINAL - FIRLATMAYA UYGUN"
+    if has_conflict:
+        status_message = f"DIKKAT! HAVA SAHASI {max_wait} DK ICINDE TEMIZLENECEKTIR"
+
+    notams = [
+        {
+            "id": f"A{random.randint(1000, 9999)}/26",
+            "msg": "TRAFFIC MONITORING ACTIVE.",
+            "severity": "BILGI",
+        },
+        {
+            "id": f"N0{random.randint(100, 999)}/26",
+            "msg": f"LAUNCH SECTOR REVIEW ACTIVE AT [{lat:.2f}, {lon:.2f}]",
+            "severity": "KRITIK" if has_conflict else "BILGI",
+        },
+    ]
+
+    response = {
+        "status": source,
+        "source": source,
+        "source_detail": source_detail or "",
+        "count": count,
+        "is_airspace_clear": not has_conflict,
+        "status_message": status_message,
+        "wait_time": max_wait,
+        "flights": flights,
+        "notams": notams,
+        "restricted_zones": [],
+    }
+    return response
+
+
+def _fallback_radar(lat, lon, source_detail):
+    seed_val = int(abs(lat * 1000) + abs(lon * 1000))
+    seeded_random = random.Random(seed_val)
+
+    flights = []
+    has_conflict = False
+    max_wait = 0
+
+    for _ in range(3):
+        distance_km = seeded_random.uniform(6, 28)
+        is_conflict = distance_km < 11.5
+        eta = seeded_random.randint(4, 14) if is_conflict else 0
+        if is_conflict:
+            has_conflict = True
+            max_wait = max(max_wait, eta)
+
+        flights.append(
+            _format_flight(
+                f"TTR{seeded_random.randint(100, 999)}",
+                "32000 ft",
+                distance_km,
+                lat + seeded_random.uniform(-0.12, 0.12),
+                lon + seeded_random.uniform(-0.12, 0.12),
+                is_conflict,
+                eta,
+                "YEDEK-RADAR",
+            )
+        )
+
+    return _build_response(lat, lon, flights, has_conflict, max_wait, "YEDEK RADAR", source_detail)
+
 
 def get_notam_and_flights(lat, lon):
     """
-    OpenSky Network API üzerinden GERÇEK CANLI UÇUŞ TRAFİĞİ çeker.
-    Eğer koordinatta uçuş yoksa veya API hata verirse akıllı simülasyonu devreye alır.
+    OpenSky uzerinden canli trafik dener; hata olursa her zaman yapisal olarak
+    ayni formatta deterministic fallback doner.
     """
+    lamin, lomin = lat - 0.5, lon - 0.5
+    lamax, lomax = lat + 0.5, lon + 0.5
+    url = f"https://opensky-network.org/api/states/all?lamin={lamin}&lomin={lomin}&lamax={lamax}&lomax={lomax}"
+
     try:
-        # 1 derecelik bir bounding box (yaklaşık 100km çap)
-        lamin, lomin = lat - 0.5, lon - 0.5
-        lamax, lomax = lat + 0.5, lon + 0.5
-        
-        url = f"https://opensky-network.org/api/states/all?lamin={lamin}&lomin={lomin}&lamax={lamax}&lomax={lomax}"
-        
-        # API'den gerçek veriyi çekelim
-        response = requests.get(url, timeout=5)
+        response = requests.get(url, timeout=OPENSKY_TIMEOUT)
         flights = []
         has_conflict = False
         max_wait = 0
-        
+
         if response.status_code == 200:
             data = response.json()
             states = data.get("states", [])
-            
-            if states:
-                for s in states[:10]: # En fazla 10 uçağı gösterelim (UI performans için)
-                    callsign = s[1].strip() or "BİLİNMİYOR"
-                    f_lon = s[5]
-                    f_lat = s[6]
-                    alt_val = s[7] # barometric altitude
-                    
-                    # Fırlatma merkezine olan uzaklık (Basit mesafe hesabı)
-                    d = math.sqrt((f_lat - lat)**2 + (f_lon - lon)**2) * 111 # km cinsinden
-                    
-                    is_conflict = d < 12.0 # 12km altı çatışma kabul edilir
-                    eta = random.randint(3, 15) if is_conflict else 0
-                    
-                    if is_conflict:
-                        has_conflict = True
-                        if eta > max_wait: max_wait = eta
-                    
-                    flights.append({
-                        "callsign": callsign,
-                        "alt": f"{int(alt_val)} m" if alt_val else "BİLİNMİYOR",
-                        "dist": f"{d:.1f} km",
-                        "lat": f_lat,
-                        "lon": f_lon,
-                        "is_conflict": is_conflict,
-                        "eta_minutes": eta,
-                        "status": "RİSKLİ" if is_conflict else "GÜVENLİ"
-                    })
-            else:
-                # Bölgede uçuş yoksa boş dönelim
-                pass
-        else:
-            # API Limiti veya Hata Durumunda (Simülasyon - opsiyonel)
-            pass
 
-        # Eğer gerçek veri boşsa (API limiti vs) yedek simülasyonu çalıştıralım
-        if not flights:
-            seed_val = int(abs(lat * 100) + abs(lon * 100))
-            random.seed(seed_val)
-            for i in range(3):
-                cs = f"THY{random.randint(100, 999)}"
-                d_val = random.uniform(5, 25)
-                is_c = d_val < 10.0
-                eta = random.randint(5, 12) if is_c else 0
-                if is_c: has_conflict = True; max_wait = max(max_wait, eta)
-                flights.append({
-                    "callsign": cs, "alt": "32000 ft", "dist": f"{d_val:.1f} km",
-                    "lat": lat + random.uniform(-0.1, 0.1), "lon": lon + random.uniform(-0.1, 0.1),
-                    "is_conflict": is_c, "eta_minutes": eta, "status": "YEDEK-RADAR"
-                })
+            for state in states[:10]:
+                callsign = (state[1] or "").strip() or "BILINMIYOR"
+                flight_lon = state[5]
+                flight_lat = state[6]
+                alt_val = state[7]
 
-        status_msg = "SİSTEM NOMİNAL - FIRLATMAYA UYGUN"
-        if has_conflict:
-            status_msg = f"DİKKAT! {max_wait} DK İÇİNDE HAVA SAHASI TEMİZLENECEKTİR"
+                if flight_lon is None or flight_lat is None:
+                    continue
 
-        return {
-            "status": "CANLI RADAR (OPENSKY)",
-            "is_airspace_clear": not has_conflict,
-            "status_message": status_msg,
-            "wait_time": max_wait,
-            "flights": flights,
-            "notams": [
-                {"id": f"A{random.randint(1000, 9999)}/26", "msg": "ACTUAL TRAFFIC MONITORING ENABLED.", "severity": "BİLGİ"},
-                {"id": f"N0{random.randint(100, 999)}/26", "msg": f"LAUNCH SECTOR CLEARANCE ACTIVE AT [{lat:.2f}, {lon:.2f}]", "severity": "KRİTİK"}
-            ]
-        }
-    except Exception as e:
-        return {"error": str(e)}
+                distance_km = math.sqrt((flight_lat - lat) ** 2 + (flight_lon - lon) ** 2) * 111
+                is_conflict = distance_km < 12.0
+                eta = random.randint(3, 15) if is_conflict else 0
+
+                if is_conflict:
+                    has_conflict = True
+                    max_wait = max(max_wait, eta)
+
+                flights.append(
+                    _format_flight(
+                        callsign,
+                        f"{int(alt_val)} m" if alt_val else "BILINMIYOR",
+                        distance_km,
+                        flight_lat,
+                        flight_lon,
+                        is_conflict,
+                        eta,
+                        "RISKLI" if is_conflict else "GUVENLI",
+                    )
+                )
+
+            if flights:
+                return _build_response(lat, lon, flights, has_conflict, max_wait, "CANLI RADAR (OPENSKY)")
+
+            return _fallback_radar(lat, lon, "OPENSKY BOS DONDU")
+
+        return _fallback_radar(lat, lon, f"HTTP {response.status_code}")
+    except requests.RequestException as exc:
+        return _fallback_radar(lat, lon, exc.__class__.__name__)
+    except Exception as exc:
+        return _fallback_radar(lat, lon, f"BEKLENMEYEN HATA: {exc.__class__.__name__}")
