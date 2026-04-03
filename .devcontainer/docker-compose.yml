@@ -1,10 +1,10 @@
 services:
   devcontainer:
     build:
-      context: ..
+      context: .
       dockerfile: docker/api.Dockerfile
     volumes:
-      - ..:/workspace:cached
+      - .:/workspace:cached
       - user_models:/data/user-models
     command: sleep infinity
     environment:
