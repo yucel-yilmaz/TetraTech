@@ -1,7 +1,11 @@
 services:
-  api:
+  devcontainer:
+    build:
+      context: ..
+      dockerfile: docker/api.Dockerfile
     volumes:
-      - ..:/workspaces/${localWorkspaceFolderBasename}:cached
+      - ..:/workspace:cached
+      - user_models:/data/user-models
     command: sleep infinity
     environment:
       OPENWEATHER_API_KEY: ${OPENWEATHER_API_KEY:-}

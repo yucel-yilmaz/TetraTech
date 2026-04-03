@@ -8,15 +8,7 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY api.py .
-COPY decision_engine.py .
-COPY map_data.py .
-COPY notam_service.py .
-COPY OpenRocketTespit.py .
-COPY space_weather.py .
-COPY spaceport_manager.py .
-COPY weather.py .
-COPY neural_decision_engine.py .
+COPY *.py ./
 COPY tetra_neural_weights.npz .
 COPY ["Uydu Dusus Hesaplayıcı", "./Uydu Dusus Hesaplayıcı"]
 

@@ -8,9 +8,10 @@
 		"docker-compose.yml"
 	],
 
-	"service": "api",
+	"service": "devcontainer",
+	"runServices": ["devcontainer"],
 
-	"workspaceFolder": "/workspaces/${localWorkspaceFolderBasename}",
+	"workspaceFolder": "/workspace",
 
 	"forwardPorts": [8010, 5000, 80],
 	"portsAttributes": {
