@@ -16,6 +16,8 @@ COPY OpenRocketTespit.py .
 COPY space_weather.py .
 COPY spaceport_manager.py .
 COPY weather.py .
+COPY neural_decision_engine.py .
+COPY tetra_neural_weights.npz .
 COPY ["Uydu Dusus Hesaplayıcı", "./Uydu Dusus Hesaplayıcı"]
 
 RUN mkdir -p /data/user-models

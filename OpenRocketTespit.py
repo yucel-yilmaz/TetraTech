@@ -517,4 +517,4 @@ def get_rocket_parameters_dict(file_path):
 
 if __name__ == "__main__":
     benim_roket_dosyam = "hadiinşallah.ork" 
-    print_all_rocket_parameters(benim_roket_dosyam)
+    print_all_rocket_parameters(benim_roket_dosyam)

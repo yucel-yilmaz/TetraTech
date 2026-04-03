@@ -1,0 +1,8 @@
+services:
+  api:
+    volumes:
+      - ..:/workspaces/${localWorkspaceFolderBasename}:cached
+    command: sleep infinity
+    environment:
+      OPENWEATHER_API_KEY: ${OPENWEATHER_API_KEY:-}
+      TETRA_MODEL_UPLOAD_DIR: ${TETRA_MODEL_UPLOAD_DIR:-/data/user-models}

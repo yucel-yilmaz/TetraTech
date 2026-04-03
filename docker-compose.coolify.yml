@@ -20,7 +20,7 @@ services:
       context: .
       dockerfile: docker/api.Dockerfile
     environment:
-      OPENWEATHER_API_KEY: ${OPENWEATHER_API_KEY}
+      OPENWEATHER_API_KEY: ${OPENWEATHER_API_KEY:-}
       TETRA_MODEL_UPLOAD_DIR: ${TETRA_MODEL_UPLOAD_DIR:-/data/user-models}
     volumes:
       - user_models:/data/user-models
